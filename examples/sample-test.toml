@@ -1,0 +1,28 @@
+# 当前10段数据的接入示例；样例统计和标注不属于通用业务规则。
+[paths]
+input_root = "../../test"
+runtime_root = "../var"
+
+[input]
+adapter = "sample_test"
+
+[match]
+# 样例元数据缺少正式比赛ID，由导入方显式指定；它不会按批次变化。
+match_id = "sample-match"
+
+[matching]
+min_common_parts = 2
+max_templates_per_player = 6
+auto_assign_enabled = false
+
+# 使用 settings.matching.policy_for(feature_space_id) 获取同空间策略。
+# 未配置校准记录时仅产生候选与复核依据；样例号码不用于校准或确认身份。
+# 如需空间专用参数，参照 ../config.example.toml 的 [[matching.policies]] 注释。
+
+[playback]
+before_event_s = 3.0
+after_event_s = 2.0
+
+[server]
+host = "127.0.0.1"
+port = 8000

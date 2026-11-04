@@ -1,0 +1,37 @@
+# 通用配置；路径相对于本配置文件。具体输入目录由部署配置指定。
+[paths]
+input_root = "./incoming"
+runtime_root = "./var"
+
+[input]
+adapter = "normalized"
+
+[match]
+# 导入方提供的稳定比赛标识；不同批次继续使用同一ID。
+match_id = "example-match"
+
+[matching]
+# 共同部位下限是KPR后端策略；模型布局由feature_space合同给出。
+min_common_parts = 2
+max_templates_per_player = 6
+auto_assign_enabled = false
+
+# 可按完整 feature_space_id 配置策略；未配置空间返回未校准的候选诊断。
+# 三项 matching 共享字段由下列策略继承；显式重复时必须保持一致。
+# [[matching.policies]]
+# feature_space_id = "替换为实际特征空间ID"
+# policy_version = "identity-v1"
+# sample_bucket_s = 0.5
+# min_query_buckets = 3
+# min_common_query_coverage = 0.8
+# min_support_rate = 0.8
+# tau、delta 仅在人工标注校准后填写；自动确认还要求匹配策略指纹的校准记录。
+# 不填写未经验证的距离阈值，不将工程抽样初值视为校准结果。
+
+[playback]
+before_event_s = 3.0
+after_event_s = 2.0
+
+[server]
+host = "127.0.0.1"
+port = 8000
