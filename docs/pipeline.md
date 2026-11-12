@@ -1,203 +1,174 @@
-# 业务流水线
+# 业务流水线与端到端执行规范
 
-## 模块定位
+## 1. 模块定位与数据流总览
 
-你的职责是把上游的“某片段某条轨迹及其特征”转成持久球员档案，持续维护归属，
-再把独立提供的事件关联到当前球员，供检索、展示和下游剪辑使用。
-片段数、球员数、导入批次数可变。跨比赛合并不默认开启。
-具体距离、候选评分和归人分支固定在 [identity-policy.md](identity-policy.md)，避免各入口自定算法。
+本模块的核心职责是将上游输入的非结构化/半结构化比赛视频数据（包括轨迹坐标、逐帧观测、ReID 外观特征、人员抠图样本），经过机器一致性检验、时空排他网络约束、多原型图库比对与集团验收，转化为稳定持久的比赛内球员档案，并在开放集合增量分批到达的场景下持续演进；同时将独立提供的比赛技术事件（如进球、投篮）解耦关联至当前正式球员，为下游前端展示、统计排行与视频剪辑提供可信依据。
 
-当前已实现 machine 无答案输入适配、sample_test 历史人工样例适配（含特征装配）、只读核验、身份核心纯算法、SQLite 存储层
-以及工作流业务闭环 v1（workflows.initialize、update、ingest_events、review、read 与 events 关联解析）。
-存储接口见 [storage.md](storage.md)，纯算法调用见 [identity-core.md](identity-core.md)。调用 `load_sample_test(settings, batch_id=..., clip_ids=None)`
-得到标准 EvidenceBatch，调用 `load_sample_test_input` 同时获得就绪特征值，`match_id` 来自配置，`batch_id` 由调用者提供。
-validate CLI 只展示该证据包的计数与警告，不创建球员或数据库；可运行 `examples/workflow_v1.py` 查看完整业务闭环。
+```mermaid
+flowchart TD
+    subgraph S1["1. 上游输入与固定分母清单"]
+        IN_RAW["机器白名单输入 (track/, identity/, video/)"] --> MANIFEST["EvaluationManifest (158轨迹/1759样本/75465观测/1346.35s)"]
+    end
 
-## 无标注基线入口（上一阶段默认模式）
+    subgraph S2["2. 轨迹内一致性准备 (track-consistency-v3)"]
+        MANIFEST --> CONSISTENCY["track-consistency-v3\n(局部连续外观支持窗 / 视角过渡区 / 资格解耦)"]
+        CONSISTENCY --> PROPOSALS["SegmentProposals (supported / unknown)"]
+    end
 
-运行 `baseline --config examples/machine-baseline.toml --run-id <新名称>`：
+    subgraph S3["3. 空间校准与多原型表征"]
+        PROPOSALS --> CALIB["DistanceCalibrationProfile 绑定 (near=0.18, far=0.45)"]
+        CALIB --> PROTO["AppearancePrototype 提取 (局部medoids / 可靠部位加权)"]
+        CALIB --> STCE["SpatioTemporalConstraintEngine (Must-Not-Link 时空硬排他图)"]
+    end
 
-1. machine adapter 只从 track/、identity/、video/ 的明确文件白名单发现片段与轨迹，
-   核对观测、样本图片、特征行与合同，生成现有 EvidenceBatch 和内存特征映射。
-2. 在项目 var 下新建运行目录及 SQLite；不连接任何旧库，不提供人工种子或模板批准。
-3. 调用 update_library 的共享 ingest → prepare → associate → resolve → gallery 路径；
-   同证据换 batch 重交核验幂等，不应新增证据或 revision。
-4. 经共享读取导出预测、诊断、配置与输入清单，保存各输入/输出哈希。
-   预测冻结后，未来独立评分才可读取答案，评分代码不得成为推理依赖。
+    subgraph S4["4. 统一 Revision R 增量流水线 (workflows.incremental)"]
+        PROTO & STCE --> INCR["7步闭环增量引擎\n(快照比对 -> 时空过滤 -> 联合聚类 -> Tarjan剪枝 -> 三态决策)"]
+        INCR --> TRANS["SQLite 原子事务提交 (001~010 迁移 / advance_revision)"]
+    end
 
-缺少自动分段时，每条原轨迹只生成暂定 Segment。观测缺帧、原始时间、图片、
-特征 row_index 与来源位置保留；暂定范围不保证段内同人，不产生身份确认或模板批准。
-默认模式使用现有 v1 空图库规则，所有身份待定是有效基线结果；该模式本身不执行自动归人。
-默认模式不做自动分段；可选的一致性分段和无种子发现模式见后文。开放集合增量发现与真实身份精度校准仍未实现。
+    subgraph S5["5. 呈现分流与人工复核"]
+        TRANS --> ROLES["PersonRole 角色分流\n(formal_player_stats vs anonymous_identity_profile)"]
+        TRANS --> REVIEW["Review Queue 富集\n(时空坐标 / 视频3 duplicate_box critical / 建议动作)"]
+        TRANS --> EVENTS["events.associate (事件延迟关联)"]
+    end
 
-## 轨迹内一致性准备（当前阶段：track-consistency-v3）
-
-`baseline --segment-tracks`（或配合 `--segmentation-version track-consistency-v3`）在上述步骤 1 与 2 之间调用
-`identity.consistency.segment_tracks(raw_batch, feature_values, policy=...)`。
-输入是原始包、全部结构化 TrackObservation 及已有特征；只用机器证据，不解析外部审核文字。
-
-在阶段2实现的 `track-consistency-v3` 中：
-1. **局部连续外观支持窗**：替代旧版全轨全对 near 易误杀正常跑动/转身的弊端。窗口内要求：
-   - 相邻样本外观连续（`relation(s_i, s_{i+1}) == "near"`，距离 $\le 0.18$）；
-   - 零 far 强反证硬约束（窗口内任意样本对距离 $< 0.45$，绝不用多数票或均值掩盖少数异类）；
-   - 中心样本（medoid anchor）支撑（窗口内存在至少一个样本 $m$，与窗口内所有其他样本均 near）；
-   - 结构连续性（相邻样本时间间隔 $\le 1.5$s，观测缺失间隔 $\le 0.25$s）。
-2. **视角平滑过渡区**：在外观渐变边界提取 `kind="viewpoint_transition_zone"` 与 `reason="viewpoint_transition_uncertainty"` 的未知过渡段，避免将正常转身误判为剧烈断裂或伪造确定性切换帧。
-3. **资格解耦**：将“可参与已有身份匹配”（`can_match_existing`）与“足够支持建立新身份”（`can_create_new_identity`）在契约上解耦；2 桶短段标记为 `short_segment_limited_match_support`，允许增量匹配已有图库，但严禁独立聚类建档。
-4. **疑似切换判定**：持续外观分离（跨侧全 far）须与局部运动突变或重叠框共同支持才报告 `suspected_identity_switch`；不确定边界保留为 unknown。
-
-新包保留停用父段、派生有效段、原始观测与来源，再调用既有 ingest 路径。
-导出原/派生证据、分段前后对照、逐对距离、风险、排除原因、不确定范围与证据不足比例。
-`supported` 只表示通过本次一致性门槛，不能直接转成正式身份或模板；
-仅分段运行不创建球员；无种子自动发现或增量分批更新需显式开启后述对应模式。
-完整策略、CLI 和下游接口见 [track-consistency.md](track-consistency.md)。
-针对需要反复调优聚类或匹配参数的多轮实验，支持提供 `--fixed-segmentation <path>` 选项：直接复用已有的 `segmentation.json` 报告（及其同目录下的 `evidence.json`），避免在多轮实验中重复执行耗时的轨迹分段，显著提升消融实验迭代效率。
-
-`sample_test` 仍用于历史人工选择样例和人工复核兼容测试，不是上述无答案入口；
-不能为了运行它而把工作区 annotations.csv 移回 test 或放宽读取根。
-
-## 无种子自动身份发现（实验与流形聚类交付）
-
-`baseline --discover-identities` 隐含分段，调用 `workflows.discover.discover_library`：
-1. **历史探索模式**：默认 absolute 兼容旧绝对门槛；complete_support_v2/cooccurrence_contrastive 需同片段独立几何共现人物作为负例，但受限于单人镜头负例缺失与非完全图桥接连坐处决，实测仅覆盖 1.5%。
-2. **2026-11-08 交付推荐模式（constrained_manifold）**：
-   - 采用轨迹级分部位可见度加权池化（`representation.py`），提取高信噪比整轨表征；
-   - 构建全局物理时空互斥图（`constraints.py`）：同机位同时刻出现的多框物理上绝对不可为同一人，建立 Must-Not-Link 铁律；
-   - 带排他硬约束的层次流形聚类（`clustering.py`）：支持正面 ↔ 侧面 ↔ 背面的连续视角过渡，聚类阈值设为 0.28（完全连接）；
-   - 历史运行 `manifold-delivery-001` 下识别 21 位核心跨视频球员，全场 75,465 条观测物理同屏碰撞严格为 0（注：早期报告中 97.22% 活跃段归人率系基于排除全部未知段的浮动分母得出，现已由阶段0统一为固定分母 7 级漏斗评测标准）。
-
-满足证据门槛的组写持久匿名 Player、proposed/automatic Assignment 以及有跨片段原始见证的自动模板；
-报告和 player 映射通过迁移 007 保存并与 revision/自动审计原子提交。
-自动模板 active/unreviewed，准入标记 automatic_experimental，不能冒充人工批准，
-也不回流证明本次归属。结果明确 experimental/unvalidated，proposed 不进入正式个人事件计数。
-未知并非“必须先人工确认才能预测”，而是本次证据规则的实际自动拒识输出。
-
-该工作流要求尚无身份和人工审核的库；同一报告重放保留 ID 且不增加 revision，
-已有其他发现或人工身份时拒绝单次冷启动重跑。分批到达与非空库更新统一由下述增量更新路径处理。
-导出 discovery.json、身份组、成员、模板来源、段对支持和未知原因，连同配置、输入与实现哈希冻结。
-规则、工程参数、风险与命令见 [identity-discovery.md](identity-discovery.md)。
-
-## 开放集合增量分批更新（当前阶段：短段匹配与资格解耦）
-
-`baseline --incremental-batches [--batch-size N] [--reverse-batches] [--calibration-profile <path>]` 支持比赛视频片段分批到达时的持续更新：
-
-1. **分批读取与轨迹一致性准备**：自动将机器片段分割为序列批次（默认每批 3 个片段），每批独立生成逐帧观测一致性分段报告（支持 `--segmentation-version track-consistency-v3`）。
-2. **冻结校准档案绑定**：支持传入 `--calibration-profile`（由阶段1产出的 `distance-calibration-profile-v1`），在运行时强制绑定特征空间距离门槛（near=0.18, far=0.45），杜绝静默 fallback 到未校准空间。
-3. **固定快照匹配与更新**：调用 `workflows.incremental.update_incremental`。算法在单一事务内基于当前 Revision $R$ 的固定图库快照比对，批次内部决策隔离；当批次提交时，原子写入新球员、归属与模板并推进到 Revision $R+1$。
-4. **三态判定与短段匹配门槛修复**：
-   - `matched_existing`：与图库中已有球员模板达成强共现对照或近距离匹配，直接关联已有 `player_id`，杜绝重复建档。在阶段2中修复了短段增量匹配门槛：具备 2 个时间桶的短段（标记为 `short_segment_limited_match_support`）在满足 `min_match_buckets=2` 与 `short_segment_match_threshold` 时，允许匹配已有图库球员；
-   - `created_new_identity`：未分配池跨片段聚类，多段完全图且与已有球员充分分离，生成持久稳定匿名 `player_id`。**重要安全约束**：未匹配的短段严格受 `can_create_new_identity=False` 拦截，绝不独立聚类建档，杜绝单视角/短段碎片化污染图库；
-   - `insufficient_evidence`：单次出现或证据不足段保持待定，无匹配或距离远绝不单独建立新人。
-5. **自动模板准入与退场**：标记为 `admission="automatic_experimental"`，附带多原始样本见证和来源绑定；人工复核或重新分配时模板自动失效。
-6. **重放幂等与重排测试**：每批导入后自动提交重放副本，核验 revision 不变且 `changed=False`；支持 `--reverse-batches` 评估时序到达顺序对未分配池和桥接阻断的影响。
-7. **增量漏斗累积单调性修复（2026-11-10 专项修复 R3）**：在 baseline 增量运行中汇总全批次分段报告，构建全局 `combined_seg_report` 注入评测漏斗，彻底修复原先仅取最后一批分段报告导致的漏斗倒挂缺陷（修复前 63 -> 166，修复后 452 -> 166 -> 141，保持严格物理单调）。
-8. **部分复制与校准一致性防御（2026-11-10 专项修复 R1, R2, R4）**：运行强制校验校准档案数值一致性断言（R1）；校准证据严格过滤低可见度部位（`min_part_visibility`）、缺失观测/框以及显式混人风险（R2）；段对评估激活非共享组件基数（$\ge 3$）、双向覆盖率（$\ge 0.8$）及唯一见证人（$\ge 2$）硬约束，阻断跨片部分复制序列欺骗（R4）。
-规则、接口与诊断见 [incremental-identity.md](incremental-identity.md)。
-
-## 共同入口和分支
-
-```text
-同伴A：轨迹 + 人物图 + ReID特征 + 可选队伍/号码
-同伴B：动作/进球等事件 + 时间 + 主体轨迹引用
-                       ↓ 可分别到达
-adapters：外部文件 → 标准 EvidenceBatch
-                       ↓
-workflows.ingest：格式/来源/版本/重复提交检查
-            ┌──────────┴──────────┐
-            ↓                     ↓
-     人物身份证据分支          事件证据分支
-     prepare 清理/分段         validate 校验时间与主体
-     associate 查已有身份      登记事件原始事实
-     resolve 确定归属/新建/待定  允许暂时没有球员归属
-     gallery 更新可用模板           │
-            └──────────┬──────────┘
-                       ↓
-      保存证据 + 身份状态 + 图库 + 修订/审计
-                       ↓
-events.associate：按当前身份段解析每个事件主体
-                       ↓
-workflows.read：档案 / 事件时间线 / 统计 / 待复核项
-                       ↓
-API / CLI / 网页 / 下游剪辑查询
+    subgraph S6["6. 防火墙与独立评分 (app/evaluation)"]
+        TRANS -.->|"产物冻结"| HASHES["artifact-hashes.json 校验 (assert_frozen_before_scoring)"]
+        HASHES --> BENCH["Stage6BenchmarkMetrics (9项显式指标 / 100%纯净度)"]
+    end
 ```
 
-各分支只在有相应输入时执行。事件-only 批次不做 ReID，人物-only 批次不要求动作结果。
-所有待写内容先计算和校验，最终在版本检查后的一个事务内提交；失败不留下半批正式状态。
-事件当前关联由共享读取规则派生；不另外维护一份独立、可能过期的 event.player_id。
+---
 
-机器适配保留全部实际轨迹观测帧和原文件引用，缺帧不补观测。
-历史 sample_test 适配的人工选择语义单独保留：
-人工目标选择只产生待确认的身份段，不等于整段身份或模板资格已确认。
-人工给定的进球时刻转换为 made 点事件，号码留在事件主体，不向整轨迹或样本传播。
+## 2. 端到端核心流水线阶段详解
 
-## 人物分支的四步
+### 阶段 1：上游输入与固定分母清单 (`EvaluationManifest`)
+1. **白名单受控读取**：`app/adapters/machine.py` 严格只读取 `track/<clip>/`（tracks.csv/jsonl, video_meta.json, samples/*.png）、`identity/<clip>/`（feature_contract.json, features.npz, samples.jsonl）以及 `video/<clip>.mp4`。严禁将任何标注文件（`annotations.csv`、`test/target/`）引入算法。
+2. **固定分母清单封装**：`app/evaluation/units.py` 将全场 10 个比赛片段的机器证据提取为不可变原子事实（158 条原始轨迹、1,759 个特征样本、75,465 条逐帧观测、1,346.35 秒时长），生成 `EvaluationManifest`，作为全仓唯一的评测基准分母，消除浮动分母产生的虚假覆盖。
 
-| 步骤 | 输入 | 产物 | 代码 |
-| --- | --- | --- | --- |
-| prepare | 轨迹、样本、质量与时间 | 可比较身份段、合格模板候选、风险项 | identity/prepare.py |
-| associate | 新身份段 + 当前图库快照 | 每段已有球员候选、距离、共同可见部位 | identity/associate.py |
-| resolve | 候选 + 队伍号码等证据 + 人工约束 | 关联已有 / 新身份提案 / 待定 / 拒绝 | identity/resolve.py |
-| gallery | 已接受的身份决策 + 合格样本 | 模板增加、替换或退出计划 | identity/gallery.py |
+### 阶段 2：轨迹内一致性准备 (`track-consistency-v3`)
+通过 `identity.consistency.segment_tracks` 对原始轨迹进行保真分段：
+1. **局部连续外观支持窗**：
+   - 相邻样本距离 $\le 0.18$（`relation == "near"`）；
+   - 零 far 强反证硬约束（窗口内任意样本对距离 $< 0.45$，绝不用多数票掩盖少数异类）；
+   - 中心样本支撑（窗口内存在至少一个 medoid anchor 与窗口内所有其他样本均 near）；
+   - 结构连续性（相邻样本间隔 $\le 1.5$s，观测缺失间隔 $\le 0.25$s）。
+2. **视角平滑过渡区**：在外观渐变边界生成 `kind="viewpoint_transition_zone"` 与 `reason="viewpoint_transition_uncertainty"` 的未知过渡段，避免正常转身被误判为剧烈混人断裂。
+3. **资格解耦**：将“可参与已有身份匹配”（`can_match_existing`）与“足够支持建立新身份”（`can_create_new_identity`）在契约上解耦；2 桶短段标记为 `short_segment_limited_match_support`，允许增量匹配已有图库，但严禁独立聚类建档。
+4. **分段提案入库**：通过迁移 008 将提案存入 `segmentation_proposals`，跨批次持久保持资格。
 
-低质量样本退出图库不等于人物不存在。未匹配不是“发现新球员”；
-新建身份需要可信的独立支持或人工确认。模板更新在当前批匹配完成后生效。
-混人轨迹先隔离/拆段；无法定位切换边界时保留待复核，不凭猜测自动切分。
-v1 新建身份由人工明确确认，图库只激活人工批准的合格模板；自动归人的样本不自动入图库。
-候选与正式确认分开，未校准时仍可推荐候选，但不自动确认或据此计算个人进球数。
+### 阶段 3：特征空间校准与多原型表征
+1. **距离校准档案绑定**：运行时强制绑定 `DistanceCalibrationProfile`（schema: `distance-calibration-profile-v1`），锁定四态距离语义：
+   - `near`: $\text{dist} \le 0.18$；
+   - `far`: $\text{dist} \ge 0.45$（强反证一票否决）；
+   - `ambiguous`: $0.18 < \text{dist} < 0.45$；
+   - `uncomparable`: 缺少共同可靠部位或低可见度。
+2. **多原型体系提取**（`AppearancePrototype`）：
+   - 按时间桶提取局部代表样本（medoids），计算 6 部位可见度加权融合与 $L_2$ 归一化；
+   - 保留每个原型的 `time_bucket`、`reliable_parts` 与 `witness_sample_ids`。
+3. **时空互斥图构建**（`SpatioTemporalConstraintEngine`）：
+   - 扫描逐帧机器观测（`track_observations`），凡在同片段同时间半开区间 $[start\_s, end\_s)$ 存在分离框的轨迹对，自动标记为 Must-Not-Link 铁律。
 
-## 初始化
+### 阶段 4：统一 Revision R 闭环增量更新 (`workflows.incremental`)
+消解冷启动与增量更新的实现分歧，统一在单一原子事务中执行 7 步闭环更新：
+1. **快照读取**：在事务启动时读取当前 Revision $R$ 的固定图库快照（`GallerySnapshot`）；
+2. **多原型图库比对**：查询段多原型与图库模板多原型执行相容视角查找，计算与最优候选球员的距离及对次优候选的竞争边距（`Rival Margin`）；
+3. **时空排他过滤**：`SpatioTemporalConstraintEngine` 硬拦截任何会导致同一球员同屏碰撞的候选；
+4. **未分配池与历史延期段联合建组**：将当前批未分配段与数据库中的历史延期段（`segmentation_proposals`）合并，执行带时空排他的层次流形聚类；
+5. **四道严苛准入关卡集团验收**：
+   - 关卡 1：簇内强反证消除（内部无 far $\ge 0.45$ 对）；
+   - 关卡 2：Rival Margin 竞争过滤（$\Delta \ge 0.04$）；
+   - 关卡 3：Tarjan 割边剪枝（剪除单桥接脆弱连接，消除 A-B-C 串联混人）；
+   - 关卡 4：跨至少 2 片段独立双见证校验；
+6. **三态互斥决策输出**：
+   - `matched_existing`：稳定关联已有 `player_id`（允许 2 桶短段以 $\tau=0.28$ 匹配）；
+   - `created_new_identity`：通过全套四道严苛关卡的新集团，分配持久稳定匿名 `player_id`；
+   - `insufficient_evidence`：单次出现或证据不完整段保持待定，记录延期提案；
+7. **原子事务写入与图库维护**：
+   - 将新球员、归属与多原型模板（存入 `template_prototypes` 表，迁移 009）一次性提交；
+   - 推进版本至 Revision $R+1$ 并写入不可变审计日志。
 
-入口：workflows.initialize.initialize_library（已实现）。
+### 阶段 5：角色边界解耦与展示分流
+1. **角色域与默认隔离**：新发现的档案默认标记为 `PersonRole.UNKNOWN_ROLE`（匿名身份档案），拥有完整轨迹与外观时间线，但不污染正式球员榜单。
+2. **正式球员统计分流**：`workflows.read.get_formal_player_stats` 严格过滤 `role == PersonRole.PLAYER`，仅为运营确认为正式球员的实体生成比赛技术统计。
+3. **人工复核队列富集**（`ReviewQueueItem`）：
+   - 自动提取 `clip_id`, `track_id`, `start_s`, `end_s` 时空坐标；
+   - 针对视频 3（clip_03）等重叠框高风险段（`duplicate_box`），自动标记为 `review_priority: "critical"`；
+   - 绑定一键复核操作建议（`ReviewActionSuggestion`：`create_player`, `split_segment`, `set_assignment`, `review_risk`）。
+4. **轻量角色设定命令**：支持通过 `SetPlayerRoleCommand` 独立修改球员角色，利用迁移 010 的表达式索引秒级生效。
 
-1. 创建或读取比赛作用域，检查尚未建立初始身份锚点；已有事件或待定证据不阻止初始化。
-2. 走共同的接入、校验和 prepare 路径。
-3. v1 根据人工确认的身份段和干净模板建立第一批档案，构造固定的初始图库快照。
-4. 其余证据只与该快照进行一致性判断；本批自动关联得到的模板不反向用于本批匹配。
-   接受明确决定，其余保留待定。
-5. 保存第一版球员 ID、模板和待复核项，关联已到达的事件。
+### 阶段 6：技术事件解耦与延迟关联
+1. **独立事件导入**：`workflows.update.ingest_events` 允许技术事件（投篮、进球）先于视频轨迹到达，仅校验时间合法性与来源幂等，不强求球员身份已就绪。
+2. **动态主体解析**：`events.associate` 在查询时根据当前 Revision 的身份段映射，将事件主体动态解析为当前 `player_id`，身份修订恢复时事件自动对齐，不篡改事件原始事实。
 
-初始化允许只识别出一部分球员，不要求凑齐上场人数。
-重复提交同一证据幂等；已有初始化状态时不清库，新的证据走增量入口。
+### 阶段 7：防火墙防泄漏与独立评分
+1. **防泄漏拦截**：`app/evaluation/guard.py` 在推理工作流入口动态阻断任何真值文件引入。
+2. **产物哈希冻结**：评分前调用 `assert_frozen_before_scoring` 完整比对产物 SHA-256。
+3. **九大显式指标评估**：在冻结产物上计算 `Stage6BenchmarkMetrics`，确保无正类报 NaN 原则，杜绝虚假 100% 精度。
 
-## 增量更新
+---
 
-入口：workflows.update.update_library（已实现）。
+## 3. CLI 命令与基线运行指南
 
-1. 读取同一 match_id 下的当前 revision 和图库快照。
-2. 接收新的 EvidenceBatch；先识别重复证据，再 prepare。
-3. 与已有身份关联，形成已有球员归属、新身份提案或待复核项。
-4. 接受满足策略的决定；保留旧 ID、人工修订和所有历史证据。
-5. 更新合格模板与修订，当前事件归属随映射一起反映到查询。
+所有基线命令均在全新独立工作目录与全新 SQLite 状态下运行：
 
-新增球员、补充已知球员的新视角、拒绝污染模板、晚到的人物证据都属于更新。
-初始化和增量调用同一组身份规则，只有是否已有锚点及身份状态的前置条件不同。
+### 3.1 全量冷启动发现 (Cold Start)
+```bash
+uv run python -m app.presentation.cli baseline \
+  --config examples/machine-discovery.toml \
+  --run-id discovery-cold-final \
+  --discover-identities
+```
+- 自动执行 `track-consistency-v3` 分段与 Revision R 闭环发现；
+- 生成 `discovery.json`, `predictions.json`, `summary.json`, `player-library.sqlite3` 与 `artifact-hashes.json`。
 
-## 独立事件导入
+### 3.2 开放集合正序增量分批更新 (Forward Incremental)
+```bash
+uv run python -m app.presentation.cli baseline \
+  --config examples/machine-discovery.toml \
+  --run-id discovery-forward-final \
+  --incremental-batches \
+  --batch-size 3 \
+  --calibration-profile var/identity-repair/stage-1/calibration-profile.json
+```
+- 将全场 10 片段按正序划分为 4 个批次（3, 3, 3, 1 片段）；
+- 每批独立原子提交，版本从 rev=1 顺序推进至 rev=5；
+- 强制绑定阶段 1 距离校准档案。
 
-入口：workflows.update.ingest_events（已实现）。
-只进行适配、事件校验、来源去重和登记，不强制跑人物分支。
-事件先到则保存未关联的原主体引用；人物证据到达后，同一事件自动显示当前归属。
-晚到片段揭示事件本身越界时，保留证据并进入复核，不阻止合法人物接入、不计正式统计。
-不变的历史事件跨批重交保持幂等；新增/更新事件仍按全部已知上下文严格校验。
-进球结果来自上游或人工证据；普通投篮动作默认不能推断命中。
+### 3.3 开放集合逆序增量分批更新 (Reverse Incremental)
+```bash
+uv run python -m app.presentation.cli baseline \
+  --config examples/machine-discovery.toml \
+  --run-id discovery-reverse-final \
+  --incremental-batches \
+  --batch-size 3 \
+  --reverse-batches \
+  --calibration-profile var/identity-repair/stage-1/calibration-profile.json
+```
+- 倒序输入批次，用于严苛评估时序到达顺序对未分配池、拓扑结构与顺序稳定性的影响（实测与 Forward 联合 ARI 达到 0.8830，全对一致率 99.80%）。
 
-## 人工维护
+### 3.4 快速多轮消融实验（复用固定分段报告）
+```bash
+uv run python -m app.presentation.cli baseline \
+  --config examples/machine-discovery.toml \
+  --run-id ablation-experiment-01 \
+  --fixed-segmentation var/identity-repair/stage-6/cold/segmentation.json \
+  --discover-identities
+```
+- 直接加载已生成的固定分段报告与派生证据，跳过耗时的逐帧观测一致性计算，快速完成聚类与准入门槛消融。
 
-入口：workflows.review.apply_review（已实现）。
-支持确认种子/匹配、新建档案、拆段、合并、改归属、模板批准/拒绝和可追溯恢复。
-维护路径：读取当前版本 → 生成变更计划 → 检查约束 → 原子保存 → 查询当前事件与统计。
-重新匹配不覆盖人工决定；拒绝模板只影响图库资格，身份与事件按各自证据保留。
-恢复从目标修订的有效状态生成新修订，统一恢复段的生效与替换关系、归属、模板、
-约束和审核；反复恢复使用实际状态清单，完整保留中间历史，失败原子回滚。
-清洁审核绑定具体样本来源版本；样本升级不转授批准，人工段级身份继续保留。
+---
 
-## 稳定输出
+## 4. 产物清单与冻结规范
 
-- 球员档案及稳定 player_id、代表图片、当前模板和来源。
-- 每个身份段当前属于谁、依据和待复核状态。
-- 按球员、动作、结果、片段或原视频时间过滤的事件及媒体定位。
-- 当前 revision、输入处理报告和修改审计。
-
-这些输出既供网页使用，也能供其他同伴的剪辑模块调用。
-
-历史早期探索中曾采用 constrained_manifold 聚类识别 21 位跨视频球员（早期基于浮动分母报告 97.22% 覆盖率，现已由阶段0纠正为固定分母漏斗标准）。当前最新基线遵循阶段0~2完整修复闭环（包含 2026-11-10 专项漏洞加固），基线运行报告见 `var/identity-repair/stage-2/handoff.txt` 与 [docs/incremental-identity.md](incremental-identity.md)。
+每次基线运行在目标目录生成如下标准冻结产物：
+1. `raw-evidence.json`：未经任何分段裁剪的原生机器输入证据；
+2. `evidence.json`：经 `track-consistency-v3` 划分后的派生标准证据包；
+3. `segmentation.json`：逐轨一致性报告，包含所有 `SegmentProposal` 及其支持状态；
+4. `discovery.json`：自动发现报告，包含段对支持细节、竞争者边距与模板多原型来源；
+5. `predictions.json`：最终生成的球员档案、段归属映射、活跃模板与待定段清单；
+6. `summary.json`：运行概要、7 级覆盖漏斗统计与执行耗时；
+7. `input-manifest.json`：所有上游输入文件的 SHA-256 与路径清单，供审计核验；
+8. `config.json`：本次运行绑定的所有算法门槛与配置参数；
+9. `player-library.sqlite3`：完整的关系型数据库状态（包含 001~010 全部表与索引）；
+10. `artifact-hashes.json`：上述所有产物的 SHA-256 签名，作为防火墙独立评分的准入门限。

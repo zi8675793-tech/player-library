@@ -1,6 +1,6 @@
 # SQLite 存储层
 
-本层保存和还原已有契约事实；不执行身份匹配、生成正式 player_id、处理人工命令或解析事件归属。工作流、事件关联与统计已实现，UI 尚未实现。`connect(database_path(settings))` 才创建数据库和父目录；加载配置及只读 `validate` 不会打开数据库。数据库名集中为 `player-library.sqlite3`，位于 `settings.paths.runtime_root`。每个连接启用外键及锁等待，打开时按顺序执行校验过的增量迁移；迁移整体失败回滚，不删除数据库或重编号球员。
+本层保存和还原已有契约事实；不执行身份匹配、生成正式 player_id、处理人工命令或解析事件归属。工作流、事件关联与统计已实现，UI 尚未实现。`connect(database_path(settings))` 才创建数据库和父目录；加载配置及只读 `validate` 不会打开数据库。数据库名集中为 `player-library.sqlite3`，位于 `settings.paths.runtime_root`。每个连接启用外键及锁等待，打开时按顺序执行校验过的增量迁移（001 至 010）；迁移整体失败回滚，不删除数据库或重编号球员。
 
 ## 模型与关系
 
@@ -108,6 +108,11 @@ finally:
 段级人工归属不因此撤销。模板使用过的样本仍按已有规则要求显式复核才能升级。
 
 
+## 逐帧机器观测持久化（迁移 006）
+
+迁移 006 引入 `track_observations` 表，完整记录机器提取的每帧目标检测框坐标（`bbox_xyxy`）、实际时间（`time_s`）、帧索引（`frame_idx`）与检测置信度（`detection_score`）。结合 `(match_id, clip_id, track_id, time_s)` 复合索引，为轨迹内一致性检查（`track-consistency-v3`）和时空排他碰撞检测（`SpatioTemporalConstraintEngine`）提供不可变的原生逐帧物理证据支持。
+
+
 ## 自动身份支持（迁移 007）
 
 `identity_discovery_reports` 按 `(match_id, report_id)` 保存不可变 DiscoveryReport JSON、
@@ -135,7 +140,7 @@ automatic_support_id 指向报告，初始 unreviewed/approval=null，不能伪�
 - `parent_segment_id TEXT NOT NULL`：被切分的原暂定段或父段标识；
 - `status TEXT NOT NULL CHECK (status IN ('supported', 'unknown'))`：分段一致性资格状态，严格限制为支持或未知；
 - `evidence_fingerprint TEXT`：对应的派生证据指纹，绑定产生该提案的观测与特征上下文；
-- `json TEXT NOT NULL CHECK (json_valid(json))`：结构化 `SegmentProposal` 契约对象的完整 JSON 序列化（在阶段2中自动囊括 `can_match_existing` 与 `can_create_new_identity` 资格解耦字段）；
+- `json TEXT NOT NULL CHECK (json_valid(json))`：结构化 `SegmentProposal` 契约对象的完整 JSON 序列化（自动囊括 `can_match_existing` 与 `can_create_new_identity` 资格解耦字段）；
 - 主键：`PRIMARY KEY (match_id, segment_id)`；
 - 状态索引：`CREATE INDEX IF NOT EXISTS idx_segmentation_proposals_status ON segmentation_proposals(match_id, status)`，加速按比赛及资格状态的过滤检索。
 
@@ -146,3 +151,53 @@ automatic_support_id 指向报告，初始 unreviewed/approval=null，不能伪�
 快照读取 `read_identity_snapshot` 会统一将当前比赛所有已存提案与指纹装配至 `IdentitySnapshot.proposals`。该机制的核心价值在于：
 1. **跨批次资格固化**：分段一致性判定（特别是局部支持窗）是在具备原始逐帧观测上下文时计算得出的；一旦持久化，后续批次无需重复计算历史片段的切分规则；
 2. **避免支持状态丢失**：跨批次增量关联时，历史分段的 `supported` / `unknown` 资格保持不变，避免因跨批次重新划分或历史局部观测上下文脱离而丢失局部支持状态，确保增量聚类与图库维护建立在稳定可信的段资格基石之上。
+
+
+## 多原型模板证据与关系索引（迁移 009）
+
+迁移 009（`app/storage/migrations/009_multi_prototype_templates.sql`）为数据库引入 `template_prototypes` 关系表，废弃历史遗留的单均值中心模糊向量，彻底实现多原型（`AppearancePrototype`）证据结构与关系持久化。
+
+### 表结构与索引
+
+```sql
+CREATE TABLE IF NOT EXISTS template_prototypes (
+    match_id TEXT NOT NULL REFERENCES matches(match_id),
+    template_id TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    sample_id TEXT NOT NULL,
+    prototype_id TEXT NOT NULL,
+    time_bucket INTEGER,
+    source_component TEXT,
+    reliable_parts_json TEXT,
+    quality_score REAL,
+    json TEXT,
+    PRIMARY KEY (match_id, template_id, prototype_id)
+);
+CREATE INDEX IF NOT EXISTS idx_template_prototypes_player
+    ON template_prototypes(match_id, player_id);
+CREATE INDEX IF NOT EXISTS idx_template_prototypes_sample
+    ON template_prototypes(match_id, sample_id);
+```
+
+### 核心设计特性
+
+1. **复合主键隔离**：以 `(match_id, template_id, prototype_id)` 形成复合主键，确保一个模板内可以容纳多个来自不同时间桶与视角的代表样本（局部 medoid），并保证原型级幂等。
+2. **溯源与可靠部位**：通过 `time_bucket`、`source_component`、`reliable_parts_json` 与 `quality_score` 记录原型的物理与特征属性，支持在跨视角比对时仅使用双方均可靠的共同部位进行精确 KPR 计算。
+3. **高效双向索引**：建立 `idx_template_prototypes_player` 与 `idx_template_prototypes_sample`，支持毫秒级查询特定球员的所有活跃外观原型，或逆向查询某样本关联的所有模板。
+
+
+## 球员角色解耦与表达式索引（迁移 010）
+
+迁移 010（`app/storage/migrations/010_player_role.sql`）为数据库引入非侵入式 JSON 表达式索引，实现球员、裁判、工作人员与未确认角色的彻底解耦。
+
+### 索引定义
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_players_role ON players(match_id, json_extract(json, '$.role'));
+```
+
+### 核心设计特性
+
+1. **表物理结构零变更**：维持 `players` 表历史经典的 4 列物理结构（`match_id`, `player_id`, `created_revision`, `json`）完全不变，100% 保持历史仓储代码、SQL 查询与单元测试的二进制级兼容。
+2. **角色域过滤加速**：通过 SQLite 原生 `json_extract(json, '$.role')` 表达式索引，使 `PlayerQuery(formal_players_only=True)` 与 `get_formal_player_stats` 能够直接走 B-Tree 索引跳过非球员档案（如 `unknown_role` 匿名档案、裁判与工作人员），杜绝全表扫描。
+3. **平滑升级与默认隔离**：历史旧记录的 JSON 未显式包含 role 字段时，Pydantic 契约反序列化默认解析为 `PersonRole.UNKNOWN_ROLE`（匿名档案），被下游正式球员统计与事件排行榜自动过滤，只有通过人工复核或特定策略确认为 `PersonRole.PLAYER` 后才计入正式榜单。

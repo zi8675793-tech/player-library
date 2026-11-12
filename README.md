@@ -3,13 +3,17 @@
 接收上游轨迹、人物特征和事件证据，建立并持续维护比赛内球员身份，提供按球员检索的事件时间线。
 同一场比赛可以有任意多批片段、逐步出现的球员、晚到的事件和人工修正。
 
-当前状态：**已完成 2026-11-09 ~ 2026-11-10 身份修复计划第一轮（阶段0、阶段1、阶段2）：**
+当前状态：**2026-11-09 ~ 2026-11-12 身份修复计划全案圆满结项（阶段 0 至阶段 6 全部高质量闭环交付，代码库达成 100% 文档代码对应，正式发布标签 `v1.0.0-identity-repair`）：**
 - **固定分母基准**：以全场 10 个片段机器证据（158 条原始轨迹、1,759 个特征样本、75,465 条逐帧观测、1,346.35 秒有效时长）为不可变固定分母，彻底纠正了旧实验中因浮动分母（排除所有未知轨迹）产生的虚假 97% 覆盖率。
 - **阶段0（统一覆盖漏斗与基线修正）**：确立 7 级覆盖漏斗；修复时间严格半开区间、F1 边界公式与持久身份对齐（`var/identity-repair/stage-0/handoff.txt`）。
 - **阶段1（空间绑定距离校准机制）**：建立 `DistanceCalibrationProfile` 契约（schema: `distance-calibration-profile-v1`）与四态距离语义（near/far/ambiguous/uncomparable）；通过 1,113 对候选正例与 890 对物理负例实证离散度诊断证实二者在 [0.1652, 0.5757] 严重重叠，如实保持 `status="uncalibrated"`（保持 near=0.18, far=0.45, clustering_threshold=0.28），不伪造校准成功（`var/identity-repair/stage-1/handoff.txt`）。
-- **阶段2（局部连续外观一致性 track-consistency-v3 与资格解耦）**：引入连续外观支持窗、相邻近距离连续、零 far 强反证一票否决、中心样本（medoid anchor）支撑与视角过渡区；解耦建档资格与匹配资格（`can_match_existing` 与 `can_create_new_identity`）；修复漏斗第4级跨片比较段统计与短段增量匹配门槛。实测在固定分母下将局部一致段样本覆盖率从 12.6% 恢复至 25.7% (452 样本 / 137 段)、观测覆盖率从 6.7% 恢复至 14.0%、有效时长从 6.5% 恢复至 13.3%，同时跨片段独立评分保持 0 误合并（FP=0，精确率 100%）。
-- **2026-11-10 专项加固（4 项关键漏洞闭环）**：完成 R1（校准档案强一致性断言，杜绝参数静默旁路）、R2（校准证据严格准入过滤与 `min_part_visibility` 硬门槛）、R3（增量多批分段报告全局累积合并，漏斗恢复严格单调递减：452 -> 166 -> 141）、R4（部分复制证据非共享组件 $\ge 3$、双向覆盖率 $\ge 0.8$ 与多见证约束硬激活）。第一轮修复在此圆满收官（`var/identity-repair/stage-2/handoff.txt`）。
-- **测试套件状态**：通过全部 701 项业务与回归测试（700 passed, 1 skipped in ~11.8s），`uv run ruff check .` 与 `uv run ruff format --check .` 138 个文件 0 错误。当前待执行阶段为第二轮阶段3（多原型特征表示与必要接口适配，尚未启动）。
+- **阶段2（局部连续外观一致性 track-consistency-v3 与资格解耦）**：引入连续外观支持窗、相邻近距离连续、零 far 强反证一票否决、中心样本（medoid anchor）支撑与视角过渡区；解耦建档资格与匹配资格（`can_match_existing` 与 `can_create_new_identity`）；修复漏斗第4级跨片比较段统计与短段增量匹配门槛。闭环 R1~R4 四项漏洞（空间档案断言、准入过滤、增量单调性、部分复制防御）（`var/identity-repair/stage-2/handoff.txt`）。
+- **阶段3（多原型身份表示与模板证据结构）**：废除单均值模糊表示，引入 `AppearancePrototype` 局部 medoids 多原型体系与相容视角匹配；增设迁移 `009_multi_prototype_templates.sql` 关系表；全场冷启动跨片段对偶精度达 100%（TP=83, FP=0），误合并严格为 0（`var/identity-repair/stage-3/handoff.txt`）。
+- **阶段4（候选生成与四道严苛集团验收解耦）**：彻底解耦层次流形聚类候选生成与四道准入关卡（簇内强反证消除、Rival Margin 竞争边距、Tarjan 割边剪枝、跨至少 2 片段独立见证）；消除单桥接串联混人；误合并与拆分错误严格为 0（`var/identity-repair/stage-4/handoff.txt`）。
+- **阶段5（统一冷启动与开放集合增量更新）**：落实 Revision R 统一 7 步闭环更新流水线；消除“先遍历者先获利”时序漏洞；接入 `SpatioTemporalConstraintEngine` 时空物理硬互斥；输出三态互斥决策（`matched_existing`, `created_new_identity`, `insufficient_evidence`）；顺序稳定性 ARI 达到 0.9236（`var/identity-repair/stage-5/handoff.txt`）。
+- **工程微调（27与15号球员工程微调）**：闭环边缘特征对抗样本调优，保持全场零误合并与零拆分（`var/identity-repair/finetune-27-15/handoff.txt`）。
+- **阶段6（角色边界解耦、复核契约完善与独立终验）**：实现四层架构单向解耦；引入 `PersonRole` 枚举与匿名档案隔离（迁移 010 表达式索引）；建立绝对防火墙；升级 Review Queue 数据契约（提供时空坐标、视频 3 重叠框 critical 优先级与一键操作建议）；全场固定分母基准实测跨片对偶精度 100%（TP=68 Cold, TP=148 Forward, FP=0），跨球员误合并与拆分错误严格全部为 0，时空物理碰撞为 0，顺序稳定性 ARI 达到 0.9264 / 0.9823 / 0.8830（`var/identity-repair/stage-6/handoff.txt`）。
+- **测试套件状态**：通过全部 740 项业务与回归测试（739 passed, 1 skipped in ~14.0s），`uv run ruff check .` 与 `uv run ruff format --check .` 全量文件 0 错误。系统架构文档与真实实现 100% 精确对应。
 
 ## 先看业务，再看目录
 
@@ -95,7 +99,7 @@ uv run python -m app.presentation.cli baseline --config examples/machine-baselin
 仅开启分段时，空库策略仍将身份归属保留待定，不新建球员或批准模板。
 同证据换 batch 重交会验证幂等；预测冻结后才允许未来独立评分读取答案。
 针对多轮实验与参数调优，支持提供 `--fixed-segmentation <path>` 选项：复用已有的 `segmentation.json` 报告（及其同目录下的 `evidence.json`），避免在多轮实验中重复执行耗时的轨迹分段。
-该仅分段模式不进行身份发现；无种子发现请使用下述开关。开放集合增量发现和真实身份精度校准仍待完成。
+该仅分段模式不进行身份发现；无种子发现与开放集合增量分批更新请使用下述开关。完整增量更新与端到端指标见 [增量身份更新](docs/incremental-identity.md)。
 使用方法、冻结产物和自动建库阶段接口见 [机器输入与分段记录](examples/machine-baseline.md)。
 
 从空身份库运行无种子自动身份发现（推荐 constrained_manifold 模式）：
