@@ -38,24 +38,189 @@ def _unordered_records(model):
 def _finish_reassessment(connection, batch, segmentation_report, feature_values, settings, primary):
     if settings.discovery.support_mode != "constrained_manifold":
         return primary
-    from app.contracts.api import UpdateRequest
-    from app.workflows.incremental import update_incremental
+    if not primary.data.get("changed", False):
+        return primary
 
-    secondary = update_incremental(
-        connection,
-        UpdateRequest(batch=batch, expected_revision=primary.revision),
-        segmentation_report=segmentation_report,
-        feature_values=feature_values,
-        settings=settings,
+    from collections import defaultdict
+
+    from app.identity.constraints import SpatioTemporalConstraintEngine
+    from app.identity.discovery import (
+        _components,
+        _Distances,
+        evaluate_existing_player_match,
     )
+    from app.identity.representation import pool_segment_features
+
+    repo = Repository(connection)
+    snapshot = read_identity_snapshot(connection, batch.match_id)
+    gallery = snapshot.gallery
+
+    if not gallery.players:
+        return primary
+
+    proposals_by_sid = {
+        p.segment.segment_id: p
+        for t in (segmentation_report.tracks if segmentation_report else [])
+        for p in t.proposals
+    }
+    active_segments = {s.segment_id: s for s in gallery.evidence.segments if s.active}
+    assigned_sids = {a.segment_id for a in gallery.assignments if a.player_id is not None}
+
+    unassigned_sids = sorted(
+        [
+            sid
+            for sid, prop in proposals_by_sid.items()
+            if sid in active_segments
+            and sid not in assigned_sids
+            and getattr(prop, "can_match_existing", True)
+            and (
+                getattr(prop, "status", None) == "supported"
+                or getattr(prop, "requires_external_anchor", False)
+            )
+        ]
+    )
+
+    if not unassigned_sids:
+        return primary
+
+    evidence = gallery.evidence
+    spaces = {s.feature_space_id: s for s in evidence.feature_spaces}
+    fsid = settings.discovery.feature_space_id
+    if fsid is None:
+        fsid = next(iter(spaces)) if len(spaces) == 1 else None
+    if fsid not in spaces:
+        return primary
+
+    all_features = dict(snapshot.feature_values)
+    if feature_values:
+        all_features.update(feature_values)
+
+    distances = _Distances(evidence.samples, spaces[fsid], all_features, settings.discovery)
+    components = _components(evidence.samples, batch.assets)
+
+    all_samples_by_sid = defaultdict(list)
+    for s in evidence.samples:
+        all_samples_by_sid[s.segment_id].append(s)
+    for sid in all_samples_by_sid:
+        all_samples_by_sid[sid].sort(key=lambda s: (s.time_s, s.sample_id))
+
+    seg_reps_by_id = pool_segment_features(
+        segments=active_segments,
+        samples=all_samples_by_sid,
+        space=spaces[fsid],
+        values=all_features,
+        min_vis=settings.discovery.min_part_visibility,
+        bucket_s=settings.discovery.bucket_s,
+        near_distance=settings.discovery.intra_segment_near_distance,
+        far_distance=settings.discovery.far_distance,
+        max_prototypes=getattr(settings.discovery, "max_prototypes_per_segment", 4),
+        components=components,
+    )
+
+    existing_players = {p.player_id: p for p in gallery.players}
+    samples_by_id = {s.sample_id: s for s in evidence.samples}
+    player_templates = defaultdict(list)
+    for t in gallery.templates:
+        if t.active and t.sample_id in samples_by_id:
+            player_templates[t.player_id].append((t, samples_by_id[t.sample_id]))
+
+    player_assignments = {
+        a.segment_id: a.player_id for a in gallery.assignments if a.player_id is not None
+    }
+
+    engine = SpatioTemporalConstraintEngine(
+        tracks=list(seg_reps_by_id.values()),
+        observations=evidence.observations,
+        manual_constraints=snapshot.constraints,
+        player_assignments=player_assignments,
+        segments_by_id=active_segments,
+        bucket_s=settings.discovery.bucket_s,
+        cooccurrence_min_buckets=settings.discovery.cooccurrence_min_buckets,
+        cooccurrence_separation_heights=settings.discovery.cooccurrence_separation_heights,
+    )
+
+    absorbed_assignments = []
+    secondary_rev = primary.revision + 1
+
+    for sid in unassigned_sids:
+        segment = active_segments[sid]
+        samples = all_samples_by_sid.get(sid, [])
+        rep = seg_reps_by_id.get(sid)
+        representatives = rep.prototypes if rep else []
+        if not representatives:
+            continue
+
+        prop = proposals_by_sid.get(sid)
+        require_all = (
+            getattr(prop, "requires_external_anchor", False)
+            or getattr(prop, "status", None) != "supported"
+        )
+
+        best_pid, best_dist, match_reasons = evaluate_existing_player_match(
+            segment=segment,
+            usable_samples=samples,
+            representatives=representatives,
+            existing_players=existing_players,
+            player_templates=player_templates,
+            distances=distances,
+            components=components,
+            policy=settings.discovery,
+            spatio_temporal_engine=engine,
+            can_match=True,
+            require_all_samples=require_all,
+        )
+
+        if best_pid is not None:
+            assignment = Assignment(
+                match_id=batch.match_id,
+                segment_id=sid,
+                player_id=best_pid,
+                status="proposed",
+                method="automatic",
+                evidence=[
+                    AssignmentEvidence(
+                        kind="automatic_discovery_experimental",
+                        reference_id=primary.data["report"]["report_id"],
+                    ),
+                    AssignmentEvidence(
+                        kind="automatic_closed_loop_absorption",
+                        reference_id=sid,
+                    ),
+                ],
+                revision=secondary_rev,
+            )
+            absorbed_assignments.append(assignment)
+            engine.player_assignments[sid] = best_pid
+
+    if not absorbed_assignments:
+        return primary
+
+    with transaction(connection):
+        for a in absorbed_assignments:
+            repo.put_assignment(
+                a,
+                committed_revision=secondary_rev,
+                replace=True,
+            )
+        repo.advance_revision(
+            batch.match_id,
+            primary.revision,
+            actor="identity.discovery",
+            reason="cold_start_closed_loop_absorption",
+            changes={
+                "report_id": primary.data["report"]["report_id"],
+                "absorbed_segments": [a.segment_id for a in absorbed_assignments],
+                "player_ids": list({a.player_id for a in absorbed_assignments}),
+            },
+        )
+
     return SuccessResponse(
         data={
             **primary.data,
-            "committed_revision": secondary.revision,
-            "reassessment": secondary.data,
-            "changed": primary.data.get("changed", False) or secondary.data.get("changed", False),
+            "committed_revision": secondary_rev,
+            "absorbed_assignments": [a.segment_id for a in absorbed_assignments],
         },
-        revision=secondary.revision,
+        revision=secondary_rev,
     )
 
 
@@ -174,6 +339,14 @@ def _discover_core(
                     ),
                     committed_revision=committed,
                 )
+        if segmentation_report and segmentation_report.tracks:
+            for t in segmentation_report.tracks:
+                for prop in t.proposals:
+                    repo.put_segmentation_proposal(
+                        batch.match_id,
+                        prop,
+                        evidence_fingerprint=segmentation_report.derived_evidence_fingerprint,
+                    )
         support_ids = {
             sid
             for group in report.groups

@@ -180,7 +180,12 @@ def _is_coherent_local_run(run, distances, policy):
     """
     if len(run) <= 1:
         return True
-    if any(b.time_s - a.time_s > policy.max_sample_gap_s for a, b in zip(run, run[1:])):
+    max_gap = (
+        getattr(policy, "max_continuous_sample_gap_s", 4.5)
+        if policy.version == "track-consistency-v3"
+        else policy.max_sample_gap_s
+    )
+    if any(b.time_s - a.time_s > max_gap for a, b in zip(run, run[1:])):
         return False
     if any(distances.relation(a, b) == "far" for a, b in combinations(run, 2)):
         return False
@@ -217,7 +222,8 @@ def _supported(samples, distances, policy):
         min_match = getattr(policy, "min_match_buckets", 2)
         if len(rel_buckets) < min_match:
             return False, "insufficient_independent_buckets"
-        if any(b.time_s - a.time_s > policy.max_sample_gap_s for a, b in zip(samples, samples[1:])):
+        max_gap = getattr(policy, "max_continuous_sample_gap_s", 4.5)
+        if any(b.time_s - a.time_s > max_gap for a, b in zip(samples, samples[1:])):
             return False, "sparse_feature_sampling"
         if any(distances.relation(a, b) == "far" for a, b in combinations(samples, 2)):
             return False, "appearance_conflict_including_minority"
@@ -550,11 +556,19 @@ def segment_tracks(
         for a, b in zip(candidates, candidates[1:]):
             if b.time_s - a.time_s > policy.max_sample_gap_s:
                 left = _end_of(a, clip, parent.end_s)
-                holes.append((left, b.time_s))
                 overlapping_breaks = [
                     kind for start, end, kind in breaks if start < b.time_s and end > a.time_s
                 ]
                 observation_continuous = "observation_interruption" not in overlapping_breaks
+                is_gap_a_hole = True
+                if (
+                    policy.version == "track-consistency-v3"
+                    and observation_continuous
+                    and not overlapping_breaks
+                ):
+                    is_gap_a_hole = False
+                if is_gap_a_hole:
+                    holes.append((left, b.time_s))
                 report.findings.append(
                     ConsistencyFinding(
                         kind="sparse_feature_sampling",
@@ -564,7 +578,7 @@ def segment_tracks(
                         details={
                             "elapsed_s": b.time_s - a.time_s,
                             "observation_continuous": observation_continuous,
-                            "identity_coverage_preserved": False,
+                            "identity_coverage_preserved": not is_gap_a_hole,
                             "anchor_candidate_only": policy.version == "track-consistency-v3"
                             and not overlapping_breaks
                             and _anchor_samples_usable(
@@ -612,6 +626,7 @@ def segment_tracks(
                         "appearance_conflict_including_minority",
                         "appearance_or_visibility_unresolved",
                         "insufficient_independent_buckets",
+                        "sparse_feature_sampling",
                     }
                     if policy.version == "track-consistency-v3"
                     else {

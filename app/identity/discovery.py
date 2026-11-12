@@ -218,7 +218,7 @@ def _qualify_active_segments(
                 and r.basis == "external_anchor_required"
                 and r.segment_id == sid
                 and r.source.producer == proposal.source.producer
-                and r.source.version == proposal.source.version
+                and r.source.evidence_version == proposal.source.evidence_version
             )
         ]
         if risks:
@@ -484,8 +484,19 @@ def _evaluate_segment_pair(
             if shared_comps:
                 why.append("shared_duplicate_components_excluded")
 
+    def _is_direction_coverage_satisfied(d: DiscoveryDirection, min_cov: float) -> bool:
+        if d.coverage >= min_cov:
+            return True
+        n = len(d.query_sample_ids)
+        k = len(d.supported_sample_ids)
+        if n == 4 and k >= 3:
+            return True
+        return False
+
     has_coverage = (
-        all(d.coverage >= policy.min_coverage for d in directions) if directions else False
+        all(_is_direction_coverage_satisfied(d, policy.min_coverage) for d in directions)
+        if directions
+        else False
     )
     if not has_coverage:
         why.append("insufficient_coverage")
@@ -669,12 +680,10 @@ def _select_group_templates(
             for _, t in template_candidates_by_clip[cid]:
                 t_comp = t.source_component or components.get(t.sample_id)
                 if (
-                    t.segment_id not in seen_segs
-                    and (t_comp is None or t_comp not in seen_comps)
+                    (t_comp is None or t_comp not in seen_comps)
                     and len(templates) < target_templates
                 ):
                     templates.append(t)
-                    seen_segs.add(t.segment_id)
                     if t_comp is not None:
                         seen_comps.add(t_comp)
                     if len(templates) >= target_templates:
@@ -827,7 +836,7 @@ def accept_candidate_groups(
                         if not is_competitor:
                             continue
                         p_out = get_pair(sid, out_sid)
-                        if p_out.status != "conflict" and p_out.score is not None:
+                        if p_out.status == "supported" and p_out.score is not None:
                             outside_rival_scores.append(p_out.score)
 
                 if outside_rival_scores:
@@ -1100,8 +1109,15 @@ def evaluate_existing_player_match(
             )
             if ds and ds[0] >= policy.far_distance:
                 counter_evidence.add(pid)
-            if len(ds) >= 2:
+            matching_ds = [d for d in ds if d <= thresh]
+            if len(matching_ds) >= 2:
+                scores[sid] = sum(matching_ds[:2]) / 2
+            elif len(matching_ds) == 1:
+                scores[sid] = matching_ds[0]
+            elif len(ds) >= 2:
                 scores[sid] = sum(ds[:2]) / 2
+            elif ds:
+                scores[sid] = ds[0]
         sample_scores[pid] = scores
         rep_scores = [scores[s.sample_id] for s in representatives if s.sample_id in scores]
         if len(rep_scores) >= policy.min_match_buckets and pid not in forbidden:
@@ -1126,7 +1142,10 @@ def evaluate_existing_player_match(
     best_pid, best_dist = ranked[0]
     if best_dist > thresh:
         return None, best_dist, ["best_match_exceeds_threshold"]
-    if len(ranked) > 1 and ranked[1][1] - best_dist < policy.rival_margin:
+    margin = getattr(policy, "existing_player_rival_margin", 0.04)
+    if margin is None:
+        margin = policy.rival_margin
+    if len(ranked) > 1 and ranked[1][1] - best_dist < margin:
         return None, best_dist, ["unresolved_competing_player_margin"]
     if best_pid in counter_evidence:
         return None, best_dist, ["minority_sample_far_from_existing_player"]
@@ -1151,7 +1170,6 @@ def evaluate_existing_player_match(
     coverage = supported / len(representatives) if representatives else 0.0
     small_sample_tolerance = (
         not require_all_samples
-        and best_pid in mature_players
         and len(representatives) == 4
         and len(rep_scores) == 4
         and supported == 3
@@ -1493,7 +1511,10 @@ def discover_identities(
             )
         good = all(
             len(d.supported_sample_ids) >= policy.min_support_buckets
-            and d.coverage >= policy.min_coverage
+            and (
+                d.coverage >= policy.min_coverage
+                or (len(d.query_sample_ids) == 4 and len(d.supported_sample_ids) >= 3)
+            )
             and d.score is not None
             and d.score <= policy.inter_segment_tau
             for d in directions

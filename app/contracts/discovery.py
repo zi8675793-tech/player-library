@@ -30,6 +30,7 @@ class DiscoveryPolicy(ContractModel):
     ] = "absolute"
     clustering_threshold: NonNegativeFloat = 0.28
     existing_player_match_threshold: NonNegativeFloat | None = None
+    existing_player_rival_margin: NonNegativeFloat = 0.04
     short_segment_match_threshold: NonNegativeFloat | None = None
     linkage: Literal["complete", "average", "single"] = "average"
     enable_geometric_negative_compensation: bool = False

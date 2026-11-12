@@ -91,6 +91,7 @@ class SegmentationPolicy(ContractModel):
     min_match_buckets: PositiveInt = 2
     bucket_s: PositiveFloat = 0.5
     max_sample_gap_s: PositiveFloat = 1.5
+    max_continuous_sample_gap_s: PositiveFloat = 4.5
     max_observation_gap_s: PositiveFloat = 0.25
     jump_heights: PositiveFloat = 1.5
     jump_heights_per_s: PositiveFloat = 8.0
@@ -110,6 +111,7 @@ class SegmentationPolicy(ContractModel):
             data.setdefault("scope_risks_to_breaks", True)
             data.setdefault("ensure_relative_buckets", True)
             data.setdefault("min_match_buckets", 2)
+            data.setdefault("max_continuous_sample_gap_s", 4.5)
         return data
 
     @model_validator(mode="after")

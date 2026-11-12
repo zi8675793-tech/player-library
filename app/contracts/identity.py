@@ -237,7 +237,9 @@ class RiskKind(StrEnum):
 
 class IdentityRisk(ContractModel):
     risk_id: Identifier
-    basis: Literal["unspecified", "raw_track_continuity_unverified"] = "unspecified"
+    basis: Literal[
+        "unspecified", "raw_track_continuity_unverified", "external_anchor_required"
+    ] = "unspecified"
     kind: RiskKind
     match_id: Identifier
     segment_id: Identifier | None = None

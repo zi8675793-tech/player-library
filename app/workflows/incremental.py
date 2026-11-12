@@ -100,6 +100,8 @@ def _complete_with_reassessment(
 ):
     if settings.discovery.support_mode != "constrained_manifold":
         return primary
+    if not primary.data.get("changed", True):
+        return primary
     secondary = reassess_unassigned(
         connection,
         request.model_copy(update={"expected_revision": primary.revision}),
@@ -256,7 +258,13 @@ def _update_incremental(
             }
         )
         already_planned_report = any(
-            r["report"].get("summary", {}).get("plan_key") == plan_key for r in existing_reports
+            r["report"].get("summary", {}).get("plan_key") == plan_key
+            or (
+                r["report"].get("input_fingerprint") == input_fp
+                and r["report"].get("summary", {}).get("association_only", False)
+                == association_only
+            )
+            for r in existing_reports
         )
 
         if all_evidence_already_stored and already_planned_report:
