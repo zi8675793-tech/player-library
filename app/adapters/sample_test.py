@@ -28,6 +28,7 @@ from app.contracts.evidence import (
     FeatureSpace,
     FileFeatureReference,
     IdentityEvidence,
+    InlineFeature,
     MediaAsset,
     Preprocessing,
     Sample,
@@ -305,7 +306,9 @@ def _observation(row, context, clip_id, fps, frame_count, width, height):
     return track, frame, time
 
 
-def _load_clip(reader, match_id, clip_id, annotation, evidence, assets, warnings, spaces):
+def _load_clip(
+    reader, match_id, clip_id, annotation, evidence, assets, warnings, spaces, feature_values=None
+):
     csv_line, row = annotation
     base = Path("target") / clip_id
     selection_path, meta_path = base / "selection.json", base / "video_meta.json"
@@ -606,6 +609,12 @@ def _load_clip(reader, match_id, clip_id, annotation, evidence, assets, warnings
                 ],
             )
         )
+        if feature_values is not None:
+            feature_values[(feature_file_id, row_index)] = InlineFeature(
+                feature_space_id=space.feature_space_id,
+                values=arrays["embeddings"][row_index].reshape(-1).tolist(),
+                visibility=arrays["visibility_scores"][row_index].tolist(),
+            )
     warnings.append(
         EvidenceWarning(
             code="identity_unconfirmed",
@@ -658,7 +667,11 @@ def _load_clip(reader, match_id, clip_id, annotation, evidence, assets, warnings
                 references=[
                     SegmentReference(
                         segment_id=s.segment_id,
-                        time=IntervalEventTime(start_s=s.start_s, end_s=s.end_s),
+                        time=(
+                            None
+                            if s.start_s <= goal_time < s.end_s
+                            else IntervalEventTime(start_s=s.start_s, end_s=s.end_s)
+                        ),
                     )
                     for s, _ in sorted(
                         selected, key=lambda item: (item[0].track_id, item[0].frame_start)
@@ -678,8 +691,12 @@ def _load_clip(reader, match_id, clip_id, annotation, evidence, assets, warnings
     ), event
 
 
-def load_sample_test(
-    settings: Settings, *, batch_id: str, clip_ids: Iterable[str] | None = None
+def _load_sample_test(
+    settings: Settings,
+    *,
+    batch_id: str,
+    clip_ids: Iterable[str] | None = None,
+    feature_values: dict[tuple[str, int], InlineFeature] | None = None,
 ) -> EvidenceBatch:
     """Validate the full handoff or selected clips and return an existing EvidenceBatch.
 
@@ -725,6 +742,7 @@ def load_sample_test(
                 assets,
                 warnings,
                 spaces,
+                feature_values,
             )
             clips.append(clip)
             events.append(event)
@@ -743,3 +761,24 @@ def load_sample_test(
         )
     except (InputReadError, ValidationError) as exc:
         raise SampleTestError(str(exc)) from exc
+
+
+def load_sample_test(
+    settings: Settings, *, batch_id: str, clip_ids: Iterable[str] | None = None
+) -> EvidenceBatch:
+    """Validate evidence without retaining parsed feature vectors in memory."""
+    return _load_sample_test(settings, batch_id=batch_id, clip_ids=clip_ids)
+
+
+def load_sample_test_input(
+    settings: Settings, *, batch_id: str, clip_ids: Iterable[str] | None = None
+) -> tuple[EvidenceBatch, dict[tuple[str, int], InlineFeature]]:
+    """Assemble workflow input from the same validated bytes and NPZ row order.
+
+    File parsing stays at this boundary. The batch retains its original file
+    references, and values are separately ready for identity and storage calls.
+    No clean-sample, identity or template approval is inferred from input labels.
+    """
+    values: dict[tuple[str, int], InlineFeature] = {}
+    batch = _load_sample_test(settings, batch_id=batch_id, clip_ids=clip_ids, feature_values=values)
+    return batch, values

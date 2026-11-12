@@ -163,6 +163,7 @@ class ResolvedEvent(ContractModel):
 
     event: Event
     subjects: list[ResolvedSubject]
+    validation_reasons: list[Identifier] = Field(default_factory=list)
     source_time: SourceEventTime | None = None
 
     @model_validator(mode="after")

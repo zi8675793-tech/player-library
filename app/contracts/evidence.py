@@ -247,6 +247,31 @@ class Track(SegmentRange):
         return self
 
 
+class TrackObservation(ContractModel):
+    """One actual detector/tracker observation in clip pixel coordinates.
+
+    Detection confidence describes the box, never the person's identity.  Missing
+    timestamps/boxes are not interpolated; repeated boxes may have distinct IDs.
+    """
+
+    observation_id: Identifier
+    match_id: Identifier
+    clip_id: Identifier
+    track_id: Identifier
+    time_s: NonNegativeFloat
+    bbox_xyxy: tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat]
+    source: Provenance
+    frame_idx: NonNegativeInt | None = None
+    detection_score: Probability | None = None
+
+    @model_validator(mode="after")
+    def ordered_box(self) -> "TrackObservation":
+        x1, y1, x2, y2 = self.bbox_xyxy
+        if x2 <= x1 or y2 <= y1:
+            raise ValueError("bbox_xyxy requires x1 < x2 and y1 < y2")
+        return self
+
+
 class ScoreSemantics(StrEnum):
     UNKNOWN = "unknown"
     DETECTION = "detection"
@@ -306,7 +331,9 @@ class Sample(ContractModel):
         return self
 
 
-def _sample_within(sample: Sample, target: Track | Segment, context: str) -> None:
+def _sample_within(
+    sample: Sample | TrackObservation, target: Track | Segment, context: str
+) -> None:
     if (sample.match_id, sample.clip_id, sample.track_id) != (
         target.match_id,
         target.clip_id,
@@ -322,6 +349,7 @@ def _sample_within(sample: Sample, target: Track | Segment, context: str) -> Non
 class IdentityEvidence(ContractModel):
     risks: list[IdentityRisk] = Field(default_factory=list)
     tracks: list[Track] = Field(default_factory=list)
+    observations: list[TrackObservation] = Field(default_factory=list)
     segments: list[Segment] = Field(default_factory=list)
     samples: list[Sample] = Field(default_factory=list)
     feature_spaces: list[FeatureSpace] = Field(default_factory=list)
@@ -332,8 +360,16 @@ class IdentityEvidence(ContractModel):
         tracks = _unique_index(
             self.tracks, lambda track: (track.clip_id, track.track_id), "tracks (clip_id, track_id)"
         )
+        observed_frames = {
+            key: set(track.observed_frame_indices)
+            for key, track in tracks.items()
+            if track.observed_frame_indices is not None
+        }
         segments = _unique_index(self.segments, lambda segment: segment.segment_id, "segment_id")
         samples = _unique_index(self.samples, lambda sample: sample.sample_id, "sample_id")
+        _unique_index(
+            self.observations, lambda observation: observation.observation_id, "observation_id"
+        )
         spaces = _unique_index(
             self.feature_spaces, lambda space: space.feature_space_id, "feature_space_id"
         )
@@ -389,6 +425,21 @@ class IdentityEvidence(ContractModel):
             if track is not None and segment.match_id != track.match_id:
                 raise ValueError(f"segment {segment.segment_id!r}: track match_id must match")
             # Selection bounds may include unobserved edges beyond Track's extent.
+        for observation in self.observations:
+            track = tracks.get((observation.clip_id, observation.track_id))
+            if track is not None:
+                _sample_within(
+                    observation,
+                    track,
+                    f"observation {observation.observation_id!r} track reference",
+                )
+                if (
+                    observation.frame_idx is not None
+                    and (observation.clip_id, observation.track_id) in observed_frames
+                    and observation.frame_idx
+                    not in observed_frames[observation.clip_id, observation.track_id]
+                ):
+                    raise ValueError("observation frame_idx missing from track observed frames")
         for file in self.feature_files:
             space = spaces.get(file.feature_space_id)
             if space is not None:
@@ -460,6 +511,7 @@ class EvidenceBatch(ContractModel):
         records = [*(self.clips or []), *(self.events or [])]
         if self.identity_evidence is not None:
             records.extend(self.identity_evidence.tracks)
+            records.extend(self.identity_evidence.observations)
             records.extend(self.identity_evidence.segments)
             records.extend(self.identity_evidence.samples)
             records.extend(self.identity_evidence.risks)
@@ -509,6 +561,20 @@ class EvidenceBatch(ContractModel):
                         frame >= clip.frame_count for frame in record.observed_frame_indices or []
                     ):
                         raise ValueError(f"{context}: observed frame exceeds clip frame_count")
+            for observation in identity.observations:
+                clip = clips.get(observation.clip_id)
+                context = (
+                    f"observation {observation.observation_id!r} in clip {observation.clip_id!r}"
+                )
+                if clip is not None:
+                    if clip.duration_s is not None:
+                        _point_within(observation.time_s, 0, clip.duration_s, context)
+                    if (
+                        clip.frame_count is not None
+                        and observation.frame_idx is not None
+                        and observation.frame_idx >= clip.frame_count
+                    ):
+                        raise ValueError(f"{context}: frame_idx exceeds clip frame_count")
             for sample in identity.samples:
                 clip = clips.get(sample.clip_id)
                 context = f"sample {sample.sample_id!r} in clip {sample.clip_id!r}"

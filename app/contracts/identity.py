@@ -7,6 +7,7 @@ from typing import Literal, Self
 
 from pydantic import ConfigDict, Field, StrictBool, model_validator
 
+from app.contracts.calibration import DistanceCalibrationProfile
 from app.contracts.common import (
     ContractModel,
     Identifier,
@@ -137,6 +138,25 @@ class Template(ContractModel):
     active: StrictBool = True
     revision: NonNegativeInt
     approval: "ReviewRecord | None" = None
+    admission: Literal["manual", "automatic_experimental"] = "manual"
+    automatic_support_id: Identifier | None = None
+    prototype_id: Identifier | None = None
+    reliable_parts: list[int] = Field(default_factory=list)
+    time_bucket: int | None = None
+    quality_score: float | None = None
+    risks: list[Identifier] = Field(default_factory=list)
+    source_component: Identifier | None = None
+
+    @model_validator(mode="after")
+    def admission_semantics(self):
+        if self.admission == "automatic_experimental":
+            if self.automatic_support_id is None or self.approval is not None:
+                raise ValueError("automatic template requires support, never human approval")
+            if self.review_status == TemplateReviewStatus.APPROVED:
+                raise ValueError("automatic admission cannot impersonate human approval")
+        elif self.automatic_support_id is not None:
+            raise ValueError("manual template cannot carry automatic admission")
+        return self
 
 
 class Candidate(ContractModel):
@@ -217,6 +237,7 @@ class RiskKind(StrEnum):
 
 class IdentityRisk(ContractModel):
     risk_id: Identifier
+    basis: Literal["unspecified", "raw_track_continuity_unverified"] = "unspecified"
     kind: RiskKind
     match_id: Identifier
     segment_id: Identifier | None = None
@@ -282,6 +303,7 @@ class MatchingPolicy(ContractModel):
         "manual_approved_confirmed_v1"
     )
     min_common_parts: PositiveInt = 2
+    min_part_visibility: Probability = 0.0
     max_templates_per_player: PositiveInt = 6
     auto_assign_enabled: StrictBool = False
     sample_bucket_s: PositiveFloat = 0.5
@@ -294,10 +316,14 @@ class MatchingPolicy(ContractModel):
     tau: NonNegativeFloat | None = None
     delta: NonNegativeFloat | None = None
     calibration: Calibration | None = None
+    distance_calibration: DistanceCalibrationProfile | None = None
 
     @property
     def fingerprint(self) -> str:
-        values = self.model_dump(mode="json", exclude={"calibration", "auto_assign_enabled"})
+        values = self.model_dump(
+            mode="json",
+            exclude={"calibration", "auto_assign_enabled", "distance_calibration"},
+        )
         encoded = json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
 
@@ -315,6 +341,14 @@ class MatchingPolicy(ContractModel):
     def valid_calibration(self) -> Self:
         if (self.tau is None) != (self.delta is None):
             raise ValueError("tau and delta must be configured together")
+        if (
+            self.distance_calibration is not None
+            and self.distance_calibration.feature_space_id != self.feature_space_id
+        ):
+            raise ValueError(
+                f"distance_calibration feature_space_id ({self.distance_calibration.feature_space_id}) "
+                f"does not match policy ({self.feature_space_id})"
+            )
         if self.calibration is not None and self.calibration.status == "validated":
             if not self.calibrated:
                 raise ValueError(

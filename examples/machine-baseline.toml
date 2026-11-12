@@ -1,0 +1,23 @@
+# 仅机器证据；每次 baseline 创建一个新目录，拒绝复用旧库。
+[paths]
+input_root = "../../test"
+runtime_root = "../var/machine-baseline"
+
+[input]
+adapter = "machine"
+
+[match]
+match_id = "machine-baseline-match"
+
+[matching]
+min_common_parts = 2
+max_templates_per_player = 6
+auto_assign_enabled = false
+
+[playback]
+before_event_s = 3.0
+after_event_s = 2.0
+
+[server]
+host = "127.0.0.1"
+port = 8000

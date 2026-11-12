@@ -2,7 +2,7 @@
 
 已实现纯计算链：标准 EvidenceBatch → prepare → associate → resolve → gallery plan。
 函数不打开特征文件、不写数据库、不分配 player_id、不执行 ReviewCommand。
-normalized adapter、正式导入、人工复核工作流、事件关联和网页仍未实现。
+SQLite 存储层、业务工作流闭环（workflows.initialize/update/review/read）与事件关联（events.validate/associate）均已完整实现；目前仅 normalized 适配器、HTTP 服务与原生网页留待后续实现。
 算法规范继续以 [identity-policy.md](identity-policy.md) 为准。
 
 ## 最小调用
@@ -98,10 +98,19 @@ MatchingPolicy 是唯一算法参数合同，settings.matching.policy_for 按空
 变更参数使原指纹失效。人工填写 validated 只是一条外部声明，算法不能证明真实标注或验证质量。
 
 开启 auto_assign_enabled 而缺少适用的有效校准时配置报错；未知空间也不会继承已开启的自动确认。
+
+## 四态距离判定与校准档案绑定
+
+纯函数 `evaluate_feature_relation(feature_a, feature_b, policy, profile=...)` 在 `app/identity/distance.py` 中导出：
+- 返回 `DistanceRelation` 枚举（`near`, `far`, `ambiguous`, `uncomparable`）；
+- 优先读取 `policy.calibration_profile` 绑定的冻结近/远门槛与可见度过滤参数；
+- 运行时严格执行校准档案一致性断言（R1）：若策略参数与档案声明冲突，显式抛出 `FeatureValidationError`；
+- 阶段3（第二轮）将基于阶段2产出的局部一致段，引入多原型身份表示与接口适配，当前核心接口与调用规范保持向前兼容。
 未匹配、距离远、无模板或不可比较始终不能自动新建球员。
 
 ## 后续工作
 
-数据库迁移、正式稳定 ID、来源幂等、人工命令执行、跨批历史范围/别名校验、expected_revision
-核对和原子提交仍属 workflows/storage；事件当前关联与统计仍属 events/workflows。
+SQLite 存储层现提供来源幂等、迁移、一致快照、revision 比较更新及审计原语，
+并提供历史范围重叠与别名环检查原语；见 [storage.md](storage.md)。正式 ID 分配、人工命令执行、
+何时应用检查及完整原子提交编排仍属 workflows；事件当前关联与统计仍属 events/workflows。
 本层只验证传入对象可用事实，不声称完成正式建库、真实比赛精度或全场人数发现。

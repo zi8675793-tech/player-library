@@ -114,6 +114,47 @@ def plan_gallery(
     for template in sorted(snapshot.templates, key=lambda item: item.template_id):
         if not template.active:
             continue
+        if template.admission == "automatic_experimental":
+            # Experimental templates never join the human-approved matching gallery.
+            # Retain only the original scope/owner; human approval creates a manual
+            # template through the ordinary review path below, with its own audit.
+            sample = original_samples.get(template.sample_id)
+            segment = next(
+                (
+                    s
+                    for s in snapshot.evidence.segments
+                    if sample is not None and s.segment_id == sample.segment_id
+                ),
+                None,
+            )
+            assignment = assignments.get(sample.segment_id) if sample else None
+            review = review_map.get(template.sample_id)
+            invalid = (
+                segment is None
+                or not segment.active
+                or assignment is None
+                or assignment.player_id != template.player_id
+                or assignment.status not in {"proposed", "confirmed"}
+            )
+            if invalid or review is not None:
+                changes.append(
+                    GalleryChange(
+                        action=GalleryAction.DEACTIVATE,
+                        template_id=template.template_id,
+                        sample_id=template.sample_id,
+                        player_id=template.player_id,
+                        feature_space_id=template.feature_space_id,
+                        reasons=[
+                            "automatic_template_scope_invalidated"
+                            if invalid
+                            else "explicit_human_template_review"
+                        ],
+                        review=review
+                        if review is None or review.review_status != "approved"
+                        else None,
+                    )
+                )
+            continue
         selected_space = template.feature_space_id == policy.feature_space_id
         reasons = []
         if selected_space:

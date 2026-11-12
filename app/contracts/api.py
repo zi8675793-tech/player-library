@@ -8,6 +8,7 @@ from pydantic import Field, JsonValue, field_validator, model_validator
 from app.contracts.common import (
     ContractModel,
     Identifier,
+    JerseyNumber,
     NonNegativeFloat,
     NonNegativeInt,
     PlayerId,
@@ -17,7 +18,9 @@ from app.contracts.events import EventOutcome
 from app.contracts.evidence import EvidenceBatch
 from app.contracts.identity import (
     AssignmentEvidence,
+    ConstraintKind,
     Player,
+    RiskResolution,
     Segment,
     TemplateReviewStatus,
     UnassignedReason,
@@ -62,8 +65,36 @@ class ImportRequest(ContractModel):
     expected_revision: NonNegativeInt
 
 
+class SeedIdentity(ContractModel):
+    """Explicit human intent; request_id identifies this seed across delivery batches."""
+
+    request_id: Identifier
+    display_name: Identifier | None = None
+    team_id: Identifier | None = None
+    jersey_number: JerseyNumber | None = None
+    segment_ids: Annotated[list[Identifier], Field(min_length=1)]
+    clean_sample_ids: Annotated[list[Identifier], Field(min_length=1)]
+    template_sample_ids: list[Identifier] = Field(default_factory=list)
+    actor: Identifier
+    reason: Identifier
+
+    @model_validator(mode="after")
+    def distinct_support(self) -> Self:
+        for values in (self.segment_ids, self.clean_sample_ids, self.template_sample_ids):
+            if len(values) != len(set(values)):
+                raise ValueError("seed support identifiers must be unique")
+        if not set(self.template_sample_ids) <= set(self.clean_sample_ids):
+            raise ValueError("seed templates require explicit clean sample approval")
+        return self
+
+
 class InitializeRequest(ImportRequest):
     """Workflow checks the absence of existing initial identity anchors."""
+
+    request_id: Identifier | None = None
+    actor: Identifier = "operator"
+    reason: Identifier = "initialize"
+    seeds: list[SeedIdentity] = Field(default_factory=list)
 
 
 class UpdateRequest(ImportRequest):
@@ -161,6 +192,43 @@ class ReviewTemplateCommand(ReviewCommandBase):
     review_status: TemplateReviewStatus
 
 
+class ReviewSampleCommand(ReviewCommandBase):
+    """Review a sample before a template_id exists, independently of identity."""
+
+    kind: Literal["review_sample"] = "review_sample"
+    sample_id: Identifier
+    player_id: PlayerId
+    feature_space_id: Identifier
+    review_status: TemplateReviewStatus
+
+
+class ReviewRiskCommand(ReviewCommandBase):
+    kind: Literal["review_risk"] = "review_risk"
+    risk_id: Identifier
+    segment_id: Identifier
+    resolution: RiskResolution
+    clean_sample_ids: list[Identifier] = Field(default_factory=list)
+
+
+class SetConstraintCommand(ReviewCommandBase):
+    kind: Literal["set_constraint"] = "set_constraint"
+    constraint_id: Identifier
+    segment_id: Identifier
+    constraint_kind: ConstraintKind
+    player_id: PlayerId | None = None
+    related_segment_id: Identifier | None = None
+
+    @model_validator(mode="after")
+    def required_targets(self) -> Self:
+        if self.constraint_kind == ConstraintKind.FORBID_PLAYER and self.player_id is None:
+            raise ValueError("forbid_player requires player_id")
+        if self.constraint_kind == ConstraintKind.CANNOT_LINK and (
+            self.related_segment_id is None or self.related_segment_id == self.segment_id
+        ):
+            raise ValueError("cannot_link requires a distinct related_segment_id")
+        return self
+
+
 class RestoreRevisionCommand(ReviewCommandBase):
     kind: Literal["restore_revision"] = "restore_revision"
     target_revision: NonNegativeInt
@@ -173,6 +241,9 @@ ReviewCommand = Annotated[
     | MergePlayersCommand
     | SetAssignmentCommand
     | ReviewTemplateCommand
+    | ReviewSampleCommand
+    | ReviewRiskCommand
+    | SetConstraintCommand
     | RestoreRevisionCommand,
     Field(discriminator="kind"),
 ]
@@ -182,6 +253,7 @@ class ReviewRequest(ContractModel):
     match_id: Identifier
     expected_revision: NonNegativeInt
     actor: Identifier
+    request_id: Identifier | None = None
     commands: Annotated[list[ReviewCommand], Field(min_length=1)]
 
     @model_validator(mode="after")

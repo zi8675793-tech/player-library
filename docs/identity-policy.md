@@ -1,7 +1,24 @@
 # 核心身份算法与归人决策 v1
 
 状态：2026-11-03 确定的 v1 规范；2026-11-04 已实现身份核心纯算法、诊断、风险与策略契约。
-正式建库、数据库/工作流和人工校准尚未完成。调用及实现边界见 [identity-core.md](identity-core.md)。
+SQLite 与业务工作流已实现；本轮已增加无人工答案的冷启动实验发现，真实身份校准尚未完成。调用及实现边界见 [identity-core.md](identity-core.md)。
+
+2026-11-06 范围更新：核心目标是从空身份库、无人工答案自动跨视频归人。
+下述人工种子与模板条款描述现有 v1 实现，不限制后续自动身份发现策略。
+上一阶段只补机器输入白名单和可复现空库基线，不启动自动分段、零种子身份发现、
+开放集合更新或真实自动识别评分。baseline 不调用人工种子和旧图库，
+原轨迹暂定段不保证段内同人，因此全部 pending 也如实导出，不能称为自动归人成功。
+
+当前阶段已增加机器证据驱动的轨迹内一致性准备（第三代 `track-consistency-v3`，见 [track-consistency.md](track-consistency.md)）与空间绑定的距离校准机制（`DistanceCalibrationProfile`，见 [data-contracts.md](data-contracts.md)）。
+自动派生 Segment 是可撤回的支持/未知提案，独立于本规范的正式身份确认和人工图库批准。
+它使用局部连续外观窗口（相邻 near $\le 0.18$、零 far $\ge 0.45$ 强反证否决、中心样本 medoid anchor 支撑）与时间/观测连续性，解耦了建档资格（`can_create_new_identity`）与匹配资格（`can_match_existing`）。
+疑似切换另需局部运动突变或重叠框共同支持，过渡区保留为 unknown，不伪造确定性切换帧。
+同人视角变化、遮挡、观测间断和重复框争议不得直接转成不同人结论。
+实证诊断表明候选正例与物理负例在距离区间 [0.1652, 0.5757] 存在严重重叠；在缺乏更优多原型表征前，算法严格保持 `status="uncalibrated"`，杜绝盲目调大全局 near 门槛。
+下述 v1 人工身份决定规则继续适用于正式归属。当前另有独立的冷启动路径：默认 `complete_support_v1` absolute，示例使用 `complete_support_v2` 共现人物对照支持，或推荐的 `constrained_manifold` 层次流形聚类，
+创建持久匿名 Player、proposed/automatic 归属与有原始见证的自动实验模板，
+不要求先人工批准，也不提升为 confirmed 或 calibration=validated；详见 [无种子自动身份发现](identity-discovery.md)。
+以下第 1–11 节保留人工模式 v1 的确认、图库与审计语义，其“第一版不做发现”不限制这条新增路径。
 
 ## 1. 第一版的选择
 
@@ -61,16 +78,22 @@
 只比较同一 feature_space_id、同一语义合同下的特征。第一版一次决策指定一个特征空间，
 不跨空间混合距离、投票或阈值；缺该空间模板时补锚点或待复核。
 
-两张图片 a、b 的第 p 个部位特征分别为 f_ap、f_bp，可见性为 v_ap、v_bp：
+两张图片 a、b 的第 p 个部位特征分别为 f_ap、f_bp，可见性为 v_ap、v_bp（仅当 v_ap >= min_part_visibility 且 v_bp >= min_part_visibility 时部位计入有效，默认 min_part_visibility=0.2）：
 
 ```text
-w_p = sqrt(v_ap * v_bp)
-common_parts = count(w_p > 0)
+valid_p = (v_ap >= min_part_visibility) and (v_bp >= min_part_visibility)
+w_p = sqrt(v_ap * v_bp) if valid_p else 0.0
+common_parts = count(valid_p)
 d(a,b) = sum(w_p * ||f_ap - f_bp||_2) / (2 * sum(w_p))
 ```
 
 共同部位少于 min_common_parts（现有配置为 2），或 sum(w_p)<=1e-12，返回不可比较及原因。
 不可比较不构造 distance=inf/0 的 Candidate；当前契约只接受有限距离。
+四态距离语义（`evaluate_feature_relation`）：
+- `near`：$d(a,b) \le \text{near\_distance}$ (基准 0.18)，局部外观一致；
+- `far`：$d(a,b) \ge \text{far\_distance}$ (基准 0.45)，强反证（一票否决）；
+- `ambiguous`：$\text{near} < d(a,b) < \text{far}$，歧义带；
+- `uncomparable`：共同有效部位不足。
 距离越小表示外观越接近，不能把 1-distance 展示为身份置信度。
 维度从合同读取，不硬编码 6 或 128，不平均整个轨迹的向量来掩盖混人。
 L2 归一化、有限值、形状、可见性范围须验证；不能偷偷重新归一化或修补非法输入。
@@ -158,6 +181,8 @@ match_existing 仅为计划：开关关闭时最多产生 proposed Assignment；
 模板无需凑满六张；数量不足时可以先建档和人工关联。
 改归属或拆段导致模板身份不再成立时，原子撤销其旧图库资格，重新审批后再激活。
 所有模板记录来源样本、批准记录、空间及修订；不能只存一份不可追溯的平均向量。
+样本清洁审核必须绑定具体来源版本；显式 supersedes 的新版样本不继承旧审核，
+重新审核后才能作为干净支持。段级人工身份决定不因这一清洁批准失效而自动撤销。
 
 ## 8. 事件怎样跟着归人结果走
 

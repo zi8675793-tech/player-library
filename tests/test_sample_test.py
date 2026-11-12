@@ -550,9 +550,12 @@ def test_excluded_identity_directory_is_never_ingested(input_data):
 
 
 @pytest.mark.sample_data
-def test_real_sample_statistics_semantics_and_read_only_tree():
-    if not REAL_ROOT.is_dir():
-        pytest.skip("read-only companion sample is unavailable")
+def test_legacy_manual_sample_statistics_semantics_and_read_only_tree():
+    # This optional legacy handoff requires answers inside its own root. Never
+    # widen the root or reach for the workspace answer to make it run. Machine
+    # acceptance is covered independently by test_machine_input.py.
+    if not (REAL_ROOT / "annotations.csv").is_file():
+        pytest.skip("legacy manual sample unavailable; not automatic identity acceptance")
     before = {
         str(path.relative_to(REAL_ROOT)): sha256(path)
         for path in REAL_ROOT.rglob("*")

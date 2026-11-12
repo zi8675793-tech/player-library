@@ -56,6 +56,8 @@ def eligible_template(
     templates. Malformed features are errors from preparation, never exclusions.
     """
     reasons: list[str] = []
+    if template.admission != "manual":
+        reasons.append("experimental_template_excluded_from_manual_gallery")
     if template.match_id != snapshot.match_id:
         raise ValueError("template and gallery must belong to the same match")
     if not template.active:

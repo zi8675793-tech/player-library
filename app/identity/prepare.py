@@ -145,7 +145,11 @@ def _within(sample: Sample, segment: Segment) -> bool:
 def _risk_applies(risk: IdentityRisk, segment: Segment, samples: Sequence[Sample]) -> bool:
     if risk.match_id != segment.match_id:
         return False
-    if risk.segment_id is not None and risk.segment_id != segment.segment_id:
+    if (
+        risk.segment_id is not None
+        and risk.segment_id != segment.segment_id
+        and risk.segment_id != segment.supersedes_segment_id
+    ):
         return False
     if risk.clip_id is not None and risk.clip_id != segment.clip_id:
         return False
@@ -175,7 +179,6 @@ def active_risks(
                     risk_id=f"mixed_identity:{sample.sample_id}",
                     kind="mixed_identity",
                     match_id=sample.match_id,
-                    segment_id=segment.segment_id,
                     sample_id=sample.sample_id,
                     source=sample.source.model_copy(deep=True),
                 )
