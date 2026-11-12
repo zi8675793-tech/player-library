@@ -27,7 +27,7 @@ from app.contracts.discovery import (
     DiscoveryReport,
     UnknownSegment,
 )
-from app.contracts.evidence import EvidenceBatch, GallerySnapshot, InlineFeature
+from app.contracts.evidence import EvidenceBatch, InlineFeature
 from app.contracts.identity import (
     Assignment,
     AssignmentEvidence,
@@ -35,7 +35,7 @@ from app.contracts.identity import (
     Player,
     Template,
 )
-from app.contracts.segmentation import SegmentationReport, SegmentProposal
+from app.contracts.segmentation import SegmentationReport
 from app.identity.constraints import SpatioTemporalConstraintEngine
 from app.identity.discovery import (
     _components,
@@ -48,10 +48,8 @@ from app.identity.discovery import (
     qualify_active_segments,
     qualify_for_new_identity,
 )
-from app.identity.fingerprints import evidence_fingerprint
+from app.identity.fingerprints import evidence_fingerprint, sample_binding
 from app.identity.representation import pool_segment_features
-from app.storage.discovery import sample_binding
-from app.storage.snapshot import IdentitySnapshot
 
 
 class IncrementalSegmentDecision(ContractModel):
@@ -108,7 +106,7 @@ def _bucket_representatives(usable_samples, segment_start_s, bucket_s, component
 
 
 def plan_incremental_identities(
-    snapshot: IdentitySnapshot | GallerySnapshot,
+    snapshot: Any,
     batch: EvidenceBatch,
     *,
     segmentation_report: SegmentationReport,
@@ -145,9 +143,9 @@ def plan_incremental_identities(
             "Explicitly configure support_mode='constrained_manifold'; falling back to other modes is strictly prohibited."
         )
 
-    if isinstance(snapshot, IdentitySnapshot):
+    if hasattr(snapshot, "gallery"):
         gallery = snapshot.gallery
-        stored_proposals: dict[str, SegmentProposal] = snapshot.segment_proposals
+        stored_proposals = getattr(snapshot, "segment_proposals", {})
     else:
         gallery = snapshot
         stored_proposals = {}

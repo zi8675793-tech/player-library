@@ -21,7 +21,15 @@ from app.contracts.evidence import (
     SourceMapping,
     Track,
 )
-from app.contracts.identity import Assignment, Candidate, Player, Resolution, Segment, Template
+from app.contracts.identity import (
+    Assignment,
+    Candidate,
+    PersonRole,
+    Player,
+    Resolution,
+    Segment,
+    Template,
+)
 
 __all__ = [
     "Assignment",
@@ -37,6 +45,7 @@ __all__ = [
     "ImportRequest",
     "IntervalEventTime",
     "MediaAsset",
+    "PersonRole",
     "Player",
     "PointEventTime",
     "Provenance",

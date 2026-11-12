@@ -57,6 +57,13 @@ class ResolutionDecision(StrEnum):
     REJECTED = "rejected"
 
 
+class PersonRole(StrEnum):
+    PLAYER = "player"
+    REFEREE = "referee"
+    STAFF = "staff"
+    UNKNOWN_ROLE = "unknown_role"
+
+
 class Segment(SegmentRange):
     """An identity interval, distinct from the upstream raw track it references."""
 
@@ -77,6 +84,7 @@ class Segment(SegmentRange):
 class Player(ContractModel):
     player_id: PlayerId
     match_id: Identifier
+    role: PersonRole = PersonRole.UNKNOWN_ROLE
     display_name: Identifier | None = None
     team_id: Identifier | None = None
     jersey_number: JerseyNumber | None = None
@@ -237,9 +245,9 @@ class RiskKind(StrEnum):
 
 class IdentityRisk(ContractModel):
     risk_id: Identifier
-    basis: Literal[
-        "unspecified", "raw_track_continuity_unverified", "external_anchor_required"
-    ] = "unspecified"
+    basis: Literal["unspecified", "raw_track_continuity_unverified", "external_anchor_required"] = (
+        "unspecified"
+    )
     kind: RiskKind
     match_id: Identifier
     segment_id: Identifier | None = None

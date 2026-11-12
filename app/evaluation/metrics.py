@@ -114,6 +114,67 @@ class SupervisedMetrics(BaseModel):
     unlabelled_units_excluded: int = 0
 
 
+class Stage6BenchmarkMetrics(BaseModel):
+    """The 9 explicit evaluation metrics defined for Stage 6 independent audit.
+
+    All metrics explicitly state their denominators, missing ground-truth handling,
+    and never report false 100% precision when predictions are zero.
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=True)
+
+    # 1. 正确覆盖 (Correct Coverage): 标注范围内正确分配的样本/观测/时长比例
+    correct_coverage_samples: float | None = None
+    correct_coverage_observations: float | None = None
+    correct_coverage_duration: float | None = None
+    correct_coverage_denominator_note: str = (
+        "有限标注范围（目标范围118样本/10段），全场未标注样本不计入真值分母"
+    )
+
+    # 2. 混人率 (Merge Error Rate / Confusion Rate): 预测球员包含多个真值人物的比例
+    merge_error_rate: float = 0.0
+    merge_error_count: int = 0
+    merge_errors_details: list[dict] = Field(default_factory=list)
+
+    # 3. 同人拆档率 (Split Error Rate): 同一真值人物被拆分为多个预测球员的比例
+    split_error_rate: float = 0.0
+    split_error_count: int = 0
+    split_errors_details: list[dict] = Field(default_factory=list)
+
+    # 4. 已归人纯度 (Assigned Purity / Precision): 预测赋予ID的单元中属于主流真值的比例
+    assigned_purity: float | None = None
+    assigned_purity_note: str = ""
+
+    # 5. 跨片配对召回与精度 (Cross-Clip Pairwise Recall & Precision)
+    cross_clip_pairwise_precision: float | None = None
+    cross_clip_pairwise_recall: float | None = None
+    cross_clip_pairwise_f1: float | None = None
+    cross_clip_pairwise_tp: int = 0
+    cross_clip_pairwise_fp: int = 0
+    cross_clip_pairwise_fn: int = 0
+
+    # 6. 延期率 (Deferred Rate): 证据不足被置于 insufficient_evidence / 延期的段数比例
+    deferred_rate: float = 0.0
+    deferred_count: int = 0
+    total_candidate_segments: int = 0
+
+    # 7. 增量重复建档率 (Incremental Duplicate Identity Rate): 同一球员被重复新建身份而非匹配已有身份的比例
+    incremental_duplicate_rate: float | None = None
+    incremental_duplicate_count: int = 0
+    incremental_duplicate_note: str = ""
+
+    # 8. 批次顺序稳定性 (Batch Order Stability): Forward vs Reverse 联合归属 ARI 与关系一致率
+    order_stability_ari: float | None = None
+    order_stability_agreement: float | None = None
+
+    # 9. 非球员污染率 (Non-Player Role Intrusion Rate): 裁判/工作人员/非球员被赋予正式球员ID的比例
+    non_player_pollution_rate: float | None = None
+    non_player_pollution_status: Literal["zero_pollution", "uncomputable_missing_ground_truth"] = (
+        "zero_pollution"
+    )
+    non_player_pollution_note: str = "当前标注集缺少裁判/工作人员真值标注时标记为不可计算，零假阳性"
+
+
 class DualTrackEvaluationReport(BaseModel):
     """Unified evaluation report containing both unsupervised and supervised tracks."""
 
@@ -123,6 +184,7 @@ class DualTrackEvaluationReport(BaseModel):
     match_id: str
     unsupervised: UnsupervisedMetrics
     supervised: SupervisedMetrics
+    stage6_metrics: Stage6BenchmarkMetrics | None = None
 
 
 @contextmanager

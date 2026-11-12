@@ -6,8 +6,8 @@ from collections.abc import Callable, Mapping, Sequence
 from app.contracts.evidence import EvidenceBatch, GallerySnapshot, InlineFeature
 from app.contracts.identity import MatchingPolicy, Segment
 from app.identity._eligibility import eligible_template, prepare_gallery
+from app.identity.fingerprints import sample_binding
 from app.identity.prepare import _within, are_duplicate_samples, resolve_feature
-from app.storage.discovery import sample_binding
 from app.storage.repositories import Repository
 
 

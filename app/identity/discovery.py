@@ -679,10 +679,9 @@ def _select_group_templates(
         for cid in clips_sorted:
             for _, t in template_candidates_by_clip[cid]:
                 t_comp = t.source_component or components.get(t.sample_id)
-                if (
-                    (t_comp is None or t_comp not in seen_comps)
-                    and len(templates) < target_templates
-                ):
+                if (t_comp is None or t_comp not in seen_comps) and len(
+                    templates
+                ) < target_templates:
                     templates.append(t)
                     if t_comp is not None:
                         seen_comps.add(t_comp)

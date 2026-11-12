@@ -193,6 +193,12 @@ def _update_incremental(
     All evidence, assignments, templates and discovery support commit atomically.
     Idempotent on re-submission of the same batch.
     """
+    from app.evaluation.guard import assert_inference_isolation, assert_no_ground_truth_in_evidence
+
+    assert_inference_isolation("update_incremental")
+    if hasattr(request.batch, "sources"):
+        assert_no_ground_truth_in_evidence(request.batch.sources)
+
     if settings.input.adapter != "machine":
         raise ValueError("incremental update requires input.adapter = 'machine'")
     batch, expected = request.batch, request.expected_revision

@@ -8,8 +8,13 @@ from contextlib import contextmanager
 from app.contracts.api import EventQuery, PlayerQuery, SuccessResponse
 from app.contracts.events import ResolvedEvent
 from app.contracts.evidence import GallerySnapshot
-from app.contracts.identity import Candidate
-from app.contracts.views import PlayerView, ReviewQueueItem
+from app.contracts.identity import Candidate, PersonRole
+from app.contracts.views import (
+    PlayerStatsView,
+    PlayerView,
+    ReviewActionSuggestion,
+    ReviewQueueItem,
+)
 from app.events.associate import associate_events
 from app.identity.prepare import active_risks
 from app.storage.discovery import read_discovery_reports
@@ -98,6 +103,8 @@ def get_players(
             if player.alias_of is None
             and (query.player_id is None or player.player_id == query.player_id)
             and (query.team_id is None or player.team_id == query.team_id)
+            and (query.role is None or player.role == query.role)
+            and (not query.formal_players_only or player.role == PersonRole.PLAYER)
         ]
         views = [
             PlayerView(
@@ -119,10 +126,63 @@ def get_players(
                     and t.review_status == "approved"
                 ],
                 made_count=counts.get(player.player_id, 0),
+                is_formal_player=(player.role == PersonRole.PLAYER),
+                profile_type=(
+                    "formal_player"
+                    if player.role == PersonRole.PLAYER
+                    else "referee_profile"
+                    if player.role == PersonRole.REFEREE
+                    else "staff_profile"
+                    if player.role == PersonRole.STAFF
+                    else "anonymous_identity_profile"
+                ),
             )
             for player in players[query.offset : query.offset + query.limit]
         ]
         return SuccessResponse(data=views, revision=gallery.revision)
+
+
+def get_formal_player_stats(
+    connection: sqlite3.Connection, match_id: str
+) -> SuccessResponse[list[PlayerStatsView]]:
+    """Return official statistics for confirmed formal players only (excludes unknown/staff/referee)."""
+    with _read_state(connection, match_id) as state:
+        gallery = state.gallery
+        counts = _made_counts(_events(connection, state))
+        stats = []
+        for player in gallery.players:
+            if player.alias_of is not None:
+                continue
+            if player.role != PersonRole.PLAYER:
+                continue
+            confirmed_segs = [
+                a.segment_id
+                for a in gallery.assignments
+                if a.player_id == player.player_id
+                and a.status == "confirmed"
+                and any(
+                    s.segment_id == a.segment_id and s.active for s in gallery.evidence.segments
+                )
+            ]
+            approved_templates = [
+                t
+                for t in gallery.templates
+                if t.player_id == player.player_id and t.active and t.review_status == "approved"
+            ]
+            stats.append(
+                PlayerStatsView(
+                    match_id=match_id,
+                    player_id=player.player_id,
+                    role=player.role,
+                    display_name=player.display_name,
+                    jersey_number=player.jersey_number,
+                    confirmed_segments_count=len(confirmed_segs),
+                    approved_templates_count=len(approved_templates),
+                    official_made_count=counts.get(player.player_id, 0),
+                    is_formal_player=True,
+                )
+            )
+        return SuccessResponse(data=stats, revision=gallery.revision)
 
 
 def get_events(
@@ -200,9 +260,37 @@ def get_review_queue(
         for plan in plans:
             if plan["segment_id"] in active and (not spaces or plan["feature_space_id"] in spaces):
                 planned[plan["segment_id"]].append(plan)
+
+        # Index samples by segment and tracks by clip
+        samples_by_seg = defaultdict(list)
+        for s in gallery.evidence.samples:
+            if s.segment_id and s.segment_id in active:
+                samples_by_seg[s.segment_id].append(s)
+            else:
+                for seg_id, seg in active.items():
+                    if (
+                        seg.clip_id == s.clip_id
+                        and seg.track_id == s.track_id
+                        and seg.start_s <= s.time_s < seg.end_s
+                    ):
+                        samples_by_seg[seg_id].append(s)
+                        break
+
+        tracks_by_clip = defaultdict(list)
+        for t in gallery.evidence.tracks:
+            tracks_by_clip[t.clip_id].append(t)
+
+        samples_by_id = {s.sample_id: s for s in gallery.evidence.samples}
+
         queue = []
         for segment_id, segment in active.items():
             assignment = assignments.get(segment_id)
+            seg_samples = samples_by_seg[segment_id]
+            thumbnail_ids = [s.image_asset_id for s in seg_samples if s.image_asset_id]
+            seg_risks = active_risks(gallery.evidence, segment, gallery.risk_reviews)
+            risk_kinds = [r.kind for r in seg_risks]
+            seg_prop = state.segment_proposals.get(segment_id)
+
             if assignment is None or assignment.status != "confirmed":
                 if planned[segment_id]:
                     for plan in planned[segment_id]:
@@ -236,21 +324,67 @@ def get_review_queue(
                                 ]
                             )
                         )
+                        candidates = (
+                            []
+                            if stale
+                            else [
+                                Candidate.model_validate(c)
+                                for c in (
+                                    association.get("candidates")
+                                    or association.get("local_candidates", [])
+                                )
+                            ]
+                        )
+                        suggested_actions = [
+                            *(
+                                [
+                                    ReviewActionSuggestion(
+                                        action="confirm_assignment",
+                                        label=f"确认关联至候选球员 {c.player_id}",
+                                        target_player_id=c.player_id,
+                                        description=f"距离/匹配分: {c.distance:.4f}"
+                                        if c.distance is not None
+                                        else None,
+                                    )
+                                    for c in candidates[:3]
+                                ]
+                            ),
+                            ReviewActionSuggestion(
+                                action="create_player",
+                                label="建立新球员档案",
+                                description="为此待定段创建独立身份",
+                            ),
+                            ReviewActionSuggestion(
+                                action="split_segment",
+                                label="按断点拆分轨迹段",
+                                description="切除遮挡或混人区间",
+                            ),
+                            ReviewActionSuggestion(
+                                action="set_assignment",
+                                label="标记为非球员或废弃",
+                                description="标记为 unassigned/rejected",
+                            ),
+                        ]
                         queue.append(
                             ReviewQueueItem(
                                 kind="identity",
                                 segment_id=segment_id,
+                                clip_id=segment.clip_id,
+                                track_id=segment.track_id,
+                                start_s=segment.start_s,
+                                end_s=segment.end_s,
                                 feature_space_id=plan.get("feature_space_id"),
                                 reasons=reasons,
-                                candidates=[]
-                                if stale
-                                else [
-                                    Candidate.model_validate(c)
-                                    for c in (
-                                        association.get("candidates")
-                                        or association.get("local_candidates", [])
-                                    )
-                                ],
+                                risk_kinds=risk_kinds,
+                                review_priority="critical"
+                                if any(
+                                    k in {"duplicate_box", "mixed_identity", "identity_conflict"}
+                                    for k in risk_kinds
+                                )
+                                else ("high" if risk_kinds else "medium"),
+                                candidates=candidates,
+                                thumbnail_asset_ids=thumbnail_ids[:6],
+                                suggested_actions=suggested_actions,
                                 details={
                                     "prepared": prepared,
                                     "association": association,
@@ -264,29 +398,76 @@ def get_review_queue(
                             )
                         )
                 else:
-                    has_samples = any(
-                        s.clip_id == segment.clip_id
-                        and s.track_id == segment.track_id
-                        and segment.start_s <= s.time_s < segment.end_s
-                        for s in gallery.evidence.samples
-                    )
-                    queue.append(
-                        ReviewQueueItem(
-                            kind="identity",
-                            segment_id=segment_id,
-                            reasons=[
+                    has_samples = bool(seg_samples)
+                    auto_reasons = []
+                    if assignment and assignment.evidence:
+                        for ev in assignment.evidence:
+                            if ev.description:
+                                auto_reasons.append(ev.description)
+                            elif ev.kind:
+                                auto_reasons.append(ev.kind)
+                    if seg_prop and seg_prop.reasons:
+                        auto_reasons.extend(seg_prop.reasons)
+                    reasons = list(
+                        dict.fromkeys(
+                            [
                                 "identity_not_confirmed",
-                                "matching_evidence_missing" if has_samples else "samples_missing",
+                                *(
+                                    ["matching_evidence_missing"]
+                                    if has_samples and not auto_reasons
+                                    else []
+                                ),
+                                *(["samples_missing"] if not has_samples else []),
                                 *(
                                     [f"human_{assignment.unassigned_reason or 'unassigned'}"]
                                     if assignment and assignment.method in {"manual", "seed"}
                                     else []
                                 ),
-                            ],
+                                *auto_reasons,
+                            ]
+                        )
+                    )
+                    suggested_actions = [
+                        ReviewActionSuggestion(
+                            action="create_player",
+                            label="建立新球员档案",
+                            description="为此待定段创建独立身份",
+                        ),
+                        ReviewActionSuggestion(
+                            action="split_segment",
+                            label="按断点拆分轨迹段",
+                            description="切除遮挡或混人区间",
+                        ),
+                        ReviewActionSuggestion(
+                            action="set_assignment",
+                            label="标记为非球员或废弃",
+                            description="标记为 unassigned/rejected",
+                        ),
+                    ]
+                    queue.append(
+                        ReviewQueueItem(
+                            kind="identity",
+                            segment_id=segment_id,
+                            clip_id=segment.clip_id,
+                            track_id=segment.track_id,
+                            start_s=segment.start_s,
+                            end_s=segment.end_s,
+                            reasons=reasons,
+                            risk_kinds=risk_kinds,
+                            review_priority="critical"
+                            if any(
+                                k in {"duplicate_box", "mixed_identity", "identity_conflict"}
+                                for k in risk_kinds
+                            )
+                            else ("high" if risk_kinds else "medium"),
+                            thumbnail_asset_ids=thumbnail_ids[:6],
+                            suggested_actions=suggested_actions,
                             details={
                                 "current_assignment": assignment.model_dump(mode="json")
                                 if assignment
-                                else None
+                                else None,
+                                "proposal": seg_prop.model_dump(mode="json") if seg_prop else None,
+                                "samples_count": len(seg_samples),
                             },
                         )
                     )
@@ -321,24 +502,94 @@ def get_review_queue(
                         for r in state.template_reviews
                     ):
                         continue
+                    t_sample = samples_by_id.get(sample_id)
+                    t_thumb = (
+                        [t_sample.image_asset_id] if t_sample and t_sample.image_asset_id else []
+                    )
                     queue.append(
                         ReviewQueueItem(
                             kind="template",
                             segment_id=segment_id,
+                            clip_id=segment.clip_id,
+                            track_id=segment.track_id,
+                            start_s=segment.start_s,
+                            end_s=segment.end_s,
                             sample_id=sample_id,
                             feature_space_id=plan.get("feature_space_id"),
                             reasons=list(dict.fromkeys([action, *change.get("reasons", [])])),
+                            review_priority="low",
+                            thumbnail_asset_ids=t_thumb,
+                            suggested_actions=[
+                                ReviewActionSuggestion(
+                                    action="review_template",
+                                    label="批准模板进入图库",
+                                    target_player_id=assignment.player_id if assignment else None,
+                                ),
+                                ReviewActionSuggestion(
+                                    action="review_template",
+                                    label="拒绝此模板",
+                                    target_player_id=assignment.player_id if assignment else None,
+                                ),
+                            ],
                             details={"change": change},
                         )
                     )
         for segment_id, segment in active.items():
+            seg_samples = samples_by_seg[segment_id]
+            thumbnail_ids = [s.image_asset_id for s in seg_samples if s.image_asset_id]
             for risk in active_risks(gallery.evidence, segment, gallery.risk_reviews):
+                overlapping = []
+                if (
+                    risk.kind in {"duplicate_box", "mixed_identity", "identity_conflict"}
+                    or "overlap" in risk.kind
+                ):
+                    overlapping = sorted(
+                        {
+                            t.track_id
+                            for t in tracks_by_clip[segment.clip_id]
+                            if t.track_id != segment.track_id
+                            and max(segment.start_s, t.start_s) < min(segment.end_s, t.end_s)
+                        }
+                    )
+                risk_priority = (
+                    "critical"
+                    if risk.kind in {"duplicate_box", "mixed_identity", "identity_conflict"}
+                    else "high"
+                )
+                suggested_actions = [
+                    ReviewActionSuggestion(
+                        action="review_risk",
+                        label=f"解除风险并标记有效: {risk.kind}",
+                        description="人工确认该轨迹无混人/重叠错误，准许参与归人",
+                    ),
+                    ReviewActionSuggestion(
+                        action="split_segment",
+                        label="切除高风险帧区间",
+                        description="按帧拆分并移除异常范围",
+                    ),
+                    ReviewActionSuggestion(
+                        action="set_assignment",
+                        label="隔离该轨迹段",
+                        description="标记为 rejected/other_person",
+                    ),
+                ]
                 queue.append(
                     ReviewQueueItem(
                         kind="risk",
                         segment_id=segment_id,
+                        clip_id=segment.clip_id,
+                        track_id=segment.track_id,
+                        start_s=segment.start_s,
+                        end_s=segment.end_s,
                         reasons=[risk.kind],
-                        details={"risk": risk.model_dump(mode="json")},
+                        risk_kinds=[risk.kind],
+                        review_priority=risk_priority,
+                        thumbnail_asset_ids=thumbnail_ids[:6],
+                        suggested_actions=suggested_actions,
+                        details={
+                            "risk": risk.model_dump(mode="json"),
+                            "overlapping_tracks": overlapping,
+                        },
                     )
                 )
         resolved_events = _events(connection, state)

@@ -16,6 +16,7 @@ from app.contracts.api import (
     ReviewTemplateCommand,
     SetAssignmentCommand,
     SetConstraintCommand,
+    SetPlayerRoleCommand,
     SplitSegmentCommand,
     SuccessResponse,
 )
@@ -462,6 +463,15 @@ def apply_review(
 
                 for t_id in migrated_template_ids:
                     templates[t_id].revision = revision
+            elif isinstance(command, SetPlayerRoleCommand):
+                if command.player_id not in players:
+                    raise ValueError(f"unknown player_id {command.player_id}")
+                old_player = players[command.player_id]
+                if old_player.role != command.role:
+                    players[command.player_id] = old_player.model_copy(
+                        update={"role": command.role}
+                    )
+                    changed_players.add(command.player_id)
             else:
                 raise UnsupportedReviewCommand(f"unsupported review command: {command.kind}")
 

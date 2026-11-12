@@ -10,8 +10,9 @@ from app.contracts.api import SuccessResponse
 from app.contracts.evidence import EvidenceBatch
 from app.contracts.identity import Assignment, AssignmentEvidence, Player, Template
 from app.identity.discovery import discover_identities
+from app.identity.fingerprints import sample_binding
 from app.storage.database import transaction
-from app.storage.discovery import put_discovery_report, read_discovery_reports, sample_binding
+from app.storage.discovery import put_discovery_report, read_discovery_reports
 from app.storage.repositories import Repository, RevisionConflict, StorageConflict
 from app.storage.snapshot import read_identity_snapshot
 
@@ -401,6 +402,12 @@ def _discover_core(
 def discover_library(
     connection, batch, *, segmentation_report, feature_values, settings, expected_revision
 ):
+    from app.evaluation.guard import assert_inference_isolation, assert_no_ground_truth_in_evidence
+
+    assert_inference_isolation("discover_library")
+    if hasattr(batch, "sources"):
+        assert_no_ground_truth_in_evidence(batch.sources)
+
     primary = _discover_core(
         connection,
         batch,

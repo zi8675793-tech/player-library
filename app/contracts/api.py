@@ -19,6 +19,7 @@ from app.contracts.evidence import EvidenceBatch
 from app.contracts.identity import (
     AssignmentEvidence,
     ConstraintKind,
+    PersonRole,
     Player,
     RiskResolution,
     Segment,
@@ -234,6 +235,12 @@ class RestoreRevisionCommand(ReviewCommandBase):
     target_revision: NonNegativeInt
 
 
+class SetPlayerRoleCommand(ReviewCommandBase):
+    kind: Literal["set_player_role"] = "set_player_role"
+    player_id: PlayerId
+    role: PersonRole
+
+
 ReviewCommand = Annotated[
     ConfirmAssignmentCommand
     | CreatePlayerCommand
@@ -244,7 +251,8 @@ ReviewCommand = Annotated[
     | ReviewSampleCommand
     | ReviewRiskCommand
     | SetConstraintCommand
-    | RestoreRevisionCommand,
+    | RestoreRevisionCommand
+    | SetPlayerRoleCommand,
     Field(discriminator="kind"),
 ]
 
@@ -274,6 +282,8 @@ class PlayerQuery(ContractModel):
     match_id: Identifier
     player_id: PlayerId | None = None
     team_id: Identifier | None = None
+    role: PersonRole | None = None
+    formal_players_only: bool = False
     offset: NonNegativeInt = 0
     limit: PositiveInt = 100
 

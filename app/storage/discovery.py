@@ -2,11 +2,12 @@
 
 import json
 import sqlite3
-import struct
 
-from app.contracts.common import SourceKey
 from app.contracts.discovery import DiscoveryReport
+from app.identity.fingerprints import sample_binding as sample_binding
 from app.storage.repositories import StorageConflict
+
+__all__ = ["read_discovery_reports", "sample_binding"]
 
 
 def read_discovery_reports(connection: sqlite3.Connection, match_id: str) -> list[dict]:
@@ -23,31 +24,6 @@ def read_discovery_reports(connection: sqlite3.Connection, match_id: str) -> lis
             (match_id,),
         )
     ]
-
-
-def sample_binding(sample, assets):
-    """Bind support to raw source versions, declared features and image contents."""
-    features = [feature.model_dump(mode="json") for feature in sample.features]
-    for feature in features:
-        if feature["kind"] == "inline":
-            for field in ("values", "visibility"):
-                if feature[field] is not None:
-                    values = feature[field]
-                    feature[field] = list(
-                        struct.unpack(f"<{len(values)}f", struct.pack(f"<{len(values)}f", *values))
-                    )
-    return {
-        "source_key": sample.source.model_dump(mode="json", include=set(SourceKey.model_fields)),
-        "clip_id": sample.clip_id,
-        "track_id": sample.track_id,
-        "frame_idx": sample.frame_idx,
-        "time_s": sample.time_s,
-        "image_asset_id": sample.image_asset_id,
-        "image_sha256": next(
-            (asset.file.sha256 for asset in assets if asset.asset_id == sample.image_asset_id), None
-        ),
-        "features": features,
-    }
 
 
 def put_discovery_report(
