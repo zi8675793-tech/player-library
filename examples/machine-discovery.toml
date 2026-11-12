@@ -1,0 +1,53 @@
+# 仅机器证据；每次 baseline 创建一个新目录，拒绝复用旧库。
+[paths]
+input_root = "../../test"
+runtime_root = "../var/identity-discovery"
+
+[input]
+adapter = "machine"
+
+[match]
+match_id = "machine-baseline-match"
+
+[matching]
+min_common_parts = 2
+max_templates_per_player = 6
+auto_assign_enabled = false
+
+[playback]
+before_event_s = 3.0
+after_event_s = 2.0
+
+[server]
+host = "127.0.0.1"
+port = 8000
+
+# 合成验证后的工程门槛；真实身份精度未校准。
+[segmentation]
+version = "track-consistency-v3"
+local_support_windows = true
+enable_transition_zones = false
+ensure_relative_buckets = false
+scope_risks_to_breaks = false
+near_distance = 0.18
+far_distance = 0.45
+min_common_parts = 2
+min_part_visibility = 0.2
+min_support_buckets = 3
+bucket_s = 0.5
+max_sample_gap_s = 1.5
+max_observation_gap_s = 0.25
+jump_heights = 1.5
+jump_heights_per_s = 8.0
+duplicate_iou = 0.85
+camera_min_tracks = 3
+camera_jump_fraction = 0.6
+
+# 在真实运行及任何评分之前固定的实验工程参数；不是独立校准结果。
+[discovery]
+version = "complete_support_v3"
+support_mode = "constrained_manifold"
+clustering_threshold = 0.28
+min_common_parts = 2
+min_part_visibility = 0.2
+max_templates_per_group = 6
