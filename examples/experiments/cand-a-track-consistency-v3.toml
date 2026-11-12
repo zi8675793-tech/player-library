@@ -1,0 +1,68 @@
+# 候选方案 A：局部分段与过渡区优化（track-consistency-v3）
+[paths]
+input_root = "../../../test"
+runtime_root = "../../var/identity-discovery"
+
+[input]
+adapter = "machine"
+
+[match]
+match_id = "machine-baseline-match"
+
+[matching]
+min_common_parts = 2
+max_templates_per_player = 6
+auto_assign_enabled = false
+
+[playback]
+before_event_s = 3.0
+after_event_s = 2.0
+
+[server]
+host = "127.0.0.1"
+port = 8000
+
+[segmentation]
+version = "track-consistency-v3"
+local_support_windows = true
+enable_transition_zones = true
+transition_uncertainty_threshold = 0.45
+scope_risks_to_breaks = true
+ensure_relative_buckets = true
+near_distance = 0.18
+far_distance = 0.45
+min_common_parts = 2
+min_part_visibility = 0.2
+min_support_buckets = 3
+bucket_s = 0.5
+max_sample_gap_s = 1.5
+max_observation_gap_s = 0.25
+jump_heights = 1.5
+jump_heights_per_s = 8.0
+duplicate_iou = 0.85
+camera_min_tracks = 3
+camera_jump_fraction = 0.6
+
+[discovery]
+version = "complete_support_v2"
+support_mode = "cooccurrence_contrastive"
+calibration = "unvalidated"
+intra_segment_near_distance = 0.18
+inter_segment_tau = 0.18
+candidate_far_distance = 0.45
+negative_evidence_distance = 0.45
+contrastive_margin = 0.06
+counter_evidence_margin = 0.06
+rival_margin = 0.06
+tau = 0.18
+max_pair_distance = 0.30
+far_distance = 0.45
+margin = 0.06
+min_common_parts = 2
+min_part_visibility = 0.2
+bucket_s = 0.5
+min_support_buckets = 3
+min_coverage = 0.8
+max_templates_per_group = 6
+cooccurrence_min_buckets = 3
+cooccurrence_separation_heights = 0.5
