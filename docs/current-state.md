@@ -33,7 +33,7 @@
 | :--- | :--- | :--- | :---: | :--- |
 | **T1: 双流特征适配器** | 针对 `test/track/*/samples/*.png` 建立球衣号码提取 (OCR) 与外观特征抽取，输出标准契约特征 | `app/features/`、84项单元测试全绿、真实模型运行产物与交接 | **已验证** | 交付进入 T2：使用 [T2 任务卡](tasks/02-constraints-and-matching.md) |
 | **T2: 时空排他与多原型匹配** | 构建 Cannot-Link 物理排他矩阵；实现多原型相容比对与增量三态决策 (`matched_existing` / `created_new` / `insufficient`) | `app/identity/matching.py`、时空引擎测试 (1,020 条真实排他边)、99 项纯逻辑用例全绿 | **已验证** | 交付进入 T3：使用 [T3 任务卡](tasks/03-workflow-and-storage.md) |
-| **T3: 流水线与 SQLite 版本化存储** | 将双流特征与匹配引擎接入 Revision R 事务流，支持分批到达、幂等重放与中断续跑 | `app/workflows/`、数据库迁移与持久化集成测试 | **待开始** | 等待启动 T3 |
+| **T3: 流水线与 SQLite 版本化存储** | 将双流特征与匹配引擎接入 Revision R 事务流，支持分批到达、幂等重放与中断续跑 | `update_dual_stream`、迁移 013、20 项端到端测试、真实 5 批数据库及冻结产物 | **已验证（工程验收）** | 进入 T4 独立评测；真实默认配置仍全部待定，不能据此宣称覆盖率达标 |
 | **T4: 独立黄金评测与基准达标** | 在评测防火墙下独立运行，核验 70 分母达标情况，生成详细失败归因与纯度账本 | `var/benchmarks/` 跑分账本、最终验收报告 | **待开始** | 等待 T3 交付后启动 |
 
 ---
@@ -44,3 +44,16 @@
 * **T1+T2 当前实测基准**：24/70 (34.3%)，0 异人混入 27 号，0 物理冲突，全量 10 个视频建立 1,020 条 Cannot-Link 强排他边。
 * **达标红线**：$\ge 57 / 70$ (81.4%) 且已知异人混入（10号、15号）数量必须为 0。
 * **评测纪律**：任何阶段的预测必须先完全冻结（产物哈希锁定），评测工具才能打开 `test/annotations.csv` 评分，杜绝任何信息泄露。
+
+
+## 5. T3 工程验收与交接（2026-11-14）
+
+- **正式双流入口**：`app.workflows.incremental.update_dual_stream(connection, *, match_id, batch_id, request_id, expected_revision, segments, extractor, matcher=None)`；输入为 T1 `TrackletSegment`，调用真实 `DualStreamExtractor` 与冻结 T2 `IncrementalMatcher`。原 `update_incremental` 保持旧版 `EvidenceBatch` 兼容，旧入口的两阶段提交不属于本次原子性保证。
+- **原子边界**：整个快照读取、计划、历史重估、持久化、revision 与审计处于同一个 `BEGIN IMMEDIATE`。当前批新段只使用 Revision R 图库；历史待定段及机器暂定归属可在同一事务的更新后图库中留一复核，排除自身所有原型/归属，重分配时撤回旧活跃原型但保留历史记录。所有结果只提交一次 R+1。
+- **存储**：新增迁移 013，未修改 001–012。`dual_stream_segments` 保存不可变几何/特征、原始切片字节指纹和精确小端 float32 BLOB；`prototypes`、`dual_stream_profiles`、`dual_stream_decisions` 保存原型及版本历史；业务投影进入现有 `players`/`assignments`，审计进入 `workflow_operations`。T2 UUID 原样保留，旧版 `PlayerId` 投影通过 `legacy_player_id` 增加 `pl_` 前缀。历史读取支持 `read_dual_stream_snapshot(..., revision=N)`。
+- **幂等与恢复**：输入指纹覆盖完整几何和实际 PNG 字节，忽略批次名、列表顺序及文件定位；同请求或同内容重放 `changed=False`，返回当前库版本并保留原始提交回执。同请求异内容拒绝；抽取中原图变化、过期新请求或任意提交异常整体回滚。人工确认、拆段、合并、恢复等导致旧版投影与双流事实不一致时拒绝自动覆盖，需后续显式协调。
+- **测试**：`uv run pytest tests/test_incremental_pipeline_e2e.py` **20 passed**；覆盖 `20 → 6 → 43 → 50 → 68`、原型 0→2→3→4→5、历史待定收敛、真实几何留一法改归、原型满额后的号码排他、历史版本恢复读取、并发写锁及故障回滚。全套 `uv run pytest tests/ -q` **1003 passed, 1 skipped**（旧版人工样例缺失，与自动身份验收无关）；专项旧版工作流/T1/T2/存储回归 **231 passed**。
+- **代码检查**：`uv run ruff check app/workflows/ app/storage/ tests/test_incremental_pipeline_e2e.py` 及对应格式检查通过。全项目 `ruff check .` 仍有历史 `eval_t1_t2_real.py` 的 12 项既有问题，文件不在 T3 修改范围，未改动。
+- **真实输入验证**：仅读取 `test/video/{20,6,43,50,68}.mp4` 及各自 `test/track/<clip>/tracks.jsonl`/`video_meta.json`；由原始帧按图像质量生成 240 张准确帧号切片，保留 80 条轨迹、38,292 次观测。离线缓存 EasyOCR + ImageNet ResNet18、默认 T2 参数，Revision 连续 **1→2→3→4→5**；原请求及异回执同内容重放均无变更；SQLite integrity/foreign-key 检查通过，已归属段物理冲突 0。
+- **真实结果边界**：上述 80 段均为 `insufficient_evidence`，球员/活跃原型/已归属段均为 0；默认 T2 相容簇门控没有形成可准入身份。多原型扩展与改归由可控图像后端端到端用例验证，不能把真实空图库的零冲突当作纯度达标。T3 不调参、不改封板 T1/T2、不读取人工答案、不复算或重新认证历史 24/70；覆盖率、纯度及体育 ReID/号码校准留给后续专项与 T4 防火墙验证。
+- **不可变交接目录**：`var/runs/run-20261114T060714-089939/`，包含真实数据库、分批回执/快照、带多原型和改归的测试数据库、输入/代码/产物指纹、复现脚本、测试日志及 `handoff.txt`。备份目录：`/Users/ahs/Documents/agc/player-library-t3-run-20261114T060714-089939/`。下阶段按 `docs/tasks/04-golden-evaluation.md`继续，先核对冻结产物，再独立评分，严禁回流人工答案。

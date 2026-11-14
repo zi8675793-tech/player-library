@@ -1,20 +1,43 @@
-"""Workflow orchestration for open-set incremental batch updates with atomic commits."""
+"""Incremental workflows for the legacy and frozen T1/T2 identity domains.
+
+``update_dual_stream`` is the T3 entry point: supply machine T1 segments and a
+DualStreamExtractor, with match_id, batch_id, request_id and expected_revision.
+It commits extraction, matching, historical review and audit in one transaction.
+``update_incremental`` retains the existing legacy EvidenceBatch interface.
+"""
 
 import hashlib
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, replace
+from pathlib import Path
 
 import numpy as np
 
 from app.contracts.api import SuccessResponse, UpdateRequest
 from app.contracts.evidence import EvidenceBatch, InlineFeature
 from app.contracts.segmentation import SegmentationReport
+from app.features.dual_stream import DualStreamExtractor, TrackletSegment
+from app.identity.constraints import SpatioTemporalConstraintEngine
 from app.identity.fingerprints import evidence_fingerprint
 from app.identity.incremental import plan_incremental_identities
+from app.identity.matching import (
+    DecisionOutcome,
+    IncrementalMatcher,
+    IncrementalPlan,
+)
 from app.settings import Settings
 from app.storage.database import transaction
 from app.storage.discovery import put_discovery_report, read_discovery_reports
+from app.storage.dual_stream import (
+    find_dual_stream_operation,
+    put_dual_stream_evidence,
+    put_dual_stream_operation,
+    put_dual_stream_plan,
+    read_dual_stream_snapshot,
+    to_json,
+)
 from app.storage.features import save_feature_value
 from app.storage.repositories import Repository, RevisionConflict, StorageConflict
 from app.storage.snapshot import read_identity_snapshot
@@ -467,3 +490,358 @@ def _update_incremental(
             },
             revision=committed,
         )
+
+
+def _dual_stream_input(segments, extractor):
+    """Bind geometry to actual crop bytes, independently of batch/order/locators."""
+    from app.evaluation.guard import assert_no_ground_truth_in_evidence
+
+    assert_no_ground_truth_in_evidence([str(extractor.crop_root)])
+    hashes = {}
+    seen_paths = set()
+    root = Path(extractor.crop_root).resolve()
+    for segment in sorted(segments, key=lambda item: item.segment_id):
+        value = asdict(segment)
+        observations = []
+        for observation in sorted(segment.observations, key=lambda item: item.frame_idx):
+            record = asdict(observation)
+            supplied = observation.crop_path
+            record.pop("crop_path")
+            record["crop_sha256"] = None
+            if supplied is not None:
+                assert_no_ground_truth_in_evidence([supplied])
+                path = Path(supplied)
+                candidate = path if path.is_absolute() else root / path
+                expected = root / segment.video_id / "samples"
+                if (
+                    candidate.parent != expected
+                    or candidate.suffix.lower() != ".png"
+                    or candidate.resolve() != candidate
+                    or not candidate.is_file()
+                ):
+                    raise ValueError("crop_path must reference a regular PNG inside video/samples")
+                if candidate in seen_paths:
+                    raise ValueError("Duplicate crop file cannot witness independent observations")
+                seen_paths.add(candidate)
+                digest = hashlib.sha256()
+                with candidate.open("rb") as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(block)
+                record["crop_sha256"] = digest.hexdigest()
+            observations.append(record)
+        if not any(item["crop_sha256"] for item in observations):
+            raise ValueError(f"No crop images for segment {segment.segment_id}")
+        value["observations"] = observations
+        hashes[segment.segment_id] = _hash(value)
+    return hashes, _hash({"algorithm": "dual-stream-input-v1", "segments": hashes})
+
+
+def _dual_stream_owner(decision):
+    if decision.outcome == DecisionOutcome.CREATED_NEW:
+        return decision.evidence["new_player_id"]
+    return decision.target_player_id
+
+
+def _dual_stream_gallery(players, plan, revision):
+    """Apply additions in memory; provisional galleries never escape the transaction."""
+    gallery = {player.player_id: player for player in players}
+    for player in plan.new_players:
+        gallery[player.player_id] = replace(
+            player,
+            created_at_revision=revision,
+            prototypes=tuple(
+                replace(proto, created_at_revision=revision) for proto in player.prototypes
+            ),
+        )
+    for prototype in plan.updated_prototypes:
+        player = gallery[prototype.player_id]
+        if not any(p.feature.segment_id == prototype.feature.segment_id for p in player.prototypes):
+            gallery[player.player_id] = replace(
+                player,
+                prototypes=(*player.prototypes, replace(prototype, created_at_revision=revision)),
+            )
+    return gallery
+
+
+def _dual_stream_reassess(snapshot, primary, segments, features, matcher):
+    """Revisit pending evidence and tentative assignments with self evidence removed.
+
+    The second gallery is provisional R+1 state inside the *same* write lock.
+    T2 receives that revision for validation; all resulting changes commit at
+    R+1, alongside the primary plan. There is no separately committed pass.
+    """
+    revision = primary.to_revision
+    gallery = _dual_stream_gallery(snapshot.players, primary, revision)
+    decisions = {decision.segment_id: decision for decision in primary.decisions}
+    assignments = dict(snapshot.assignments)
+
+    def update_assignments(items):
+        for decision in items:
+            owner = _dual_stream_owner(decision)
+            if owner is None:
+                assignments.pop(decision.segment_id, None)
+            else:
+                assignments[decision.segment_id] = owner
+
+    update_assignments(primary.decisions)
+    # Only historical deferred queries may see the provisional updated gallery.
+    # New queries keep their fixed Revision-R decisions for this entire batch.
+    deferred_history = [sid for sid in primary.deferred_segments if sid in snapshot.decisions]
+    if deferred_history:
+        pending = matcher.plan(
+            [features[sid] for sid in deferred_history],
+            tuple(gallery.values()),
+            segments=segments,
+            batch_id=primary.batch_id,
+            from_revision=revision,
+            player_assignments=assignments,
+        )
+        gallery = _dual_stream_gallery(tuple(gallery.values()), pending, revision)
+        for decision in pending.decisions:
+            decisions[decision.segment_id] = replace(
+                decision,
+                evidence={**decision.evidence, "reassessment": "leave_one_out"},
+            )
+        update_assignments(pending.decisions)
+
+    reassessed = set(snapshot.decisions) & set(decisions)
+    for sid, old_owner in sorted(snapshot.assignments.items()):
+        # Each historical query is held out from every profile, and from the
+        # historical assignment map. Other segments retain their physical bans.
+        held_out = tuple(
+            replace(
+                player,
+                prototypes=tuple(p for p in player.prototypes if p.feature.segment_id != sid),
+            )
+            for player in gallery.values()
+        )
+        review = matcher.plan(
+            [features[sid]],
+            held_out,
+            segments=segments,
+            batch_id=primary.batch_id,
+            from_revision=revision,
+            player_assignments={key: owner for key, owner in assignments.items() if key != sid},
+        )
+        reassessed.add(sid)
+        decision = review.decisions[0]
+        owner = _dual_stream_owner(decision)
+        if owner == old_owner:
+            continue
+        # Reassignment/demotion must retract the source from its previous owner;
+        # its immutable historical prototype record remains in storage.
+        gallery = {
+            player.player_id: replace(
+                player,
+                prototypes=tuple(p for p in player.prototypes if p.feature.segment_id != sid),
+            )
+            for player in gallery.values()
+        }
+        gallery = _dual_stream_gallery(tuple(gallery.values()), review, revision)
+        decisions[sid] = replace(
+            decision,
+            evidence={
+                **decision.evidence,
+                "reassessment": "leave_one_out",
+                "previous_player_id": old_owner,
+            },
+        )
+        update_assignments([decision])
+
+    original_ids = {player.player_id for player in snapshot.players}
+    original_prototypes = {
+        proto.prototype_id for player in snapshot.players for proto in player.prototypes
+    }
+    ordered = tuple(decisions[sid] for sid in sorted(decisions))
+    plan = IncrementalPlan(
+        primary.batch_id,
+        primary.from_revision,
+        revision,
+        ordered,
+        tuple(gallery[pid] for pid in sorted(gallery.keys() - original_ids)),
+        tuple(
+            proto
+            for pid in sorted(original_ids)
+            for proto in gallery[pid].prototypes
+            if proto.prototype_id not in original_prototypes
+        ),
+        tuple(d.segment_id for d in ordered if d.outcome == DecisionOutcome.INSUFFICIENT),
+    )
+    return plan, tuple(gallery[pid] for pid in sorted(gallery)), assignments, sorted(reassessed)
+
+
+def _validate_dual_stream_commit(players, assignments, segments, features):
+    """Fail closed before persisting any physically inconsistent final state."""
+    engine = SpatioTemporalConstraintEngine(segments=segments, player_assignments=assignments)
+    by_player = {}
+    for sid, pid in assignments.items():
+        by_player.setdefault(pid, []).append(sid)
+    profiles = {player.player_id: player for player in players}
+    for pid, ids in by_player.items():
+        if pid not in profiles:
+            raise StorageConflict("Assignment references an unknown dual-stream player")
+        for i, left in enumerate(ids):
+            if any(engine.pair_relation(left, right) != "clear" for right in ids[i + 1 :]):
+                raise StorageConflict("Dual-stream plan violates a physical cannot-link")
+    for player in players:
+        numbers = {player.confirmed_jersey_number} - {None}
+        # Prototype capacity must not erase a physical number seen on an
+        # assigned segment that was not admitted as another appearance view.
+        for sid in by_player.get(player.player_id, ()):
+            jersey = features[sid].jersey
+            if jersey is not None and jersey.number is not None:
+                numbers.add(jersey.number)
+        for prototype in player.prototypes:
+            if assignments.get(prototype.feature.segment_id) != player.player_id:
+                raise StorageConflict("Active prototype has no matching current assignment")
+            if prototype.feature.jersey is not None and prototype.feature.jersey.number is not None:
+                numbers.add(prototype.feature.jersey.number)
+        if len(numbers) > 1:
+            raise StorageConflict("Dual-stream profile contains conflicting jersey numbers")
+
+
+def update_dual_stream(
+    connection: sqlite3.Connection,
+    *,
+    match_id: str,
+    batch_id: str,
+    request_id: str,
+    expected_revision: int,
+    segments: Sequence[TrackletSegment],
+    extractor: DualStreamExtractor,
+    matcher: IncrementalMatcher | None = None,
+    actor: str = "automatic",
+) -> SuccessResponse[dict]:
+    """Run T1/T2 and historical leave-one-out review in one BEGIN IMMEDIATE.
+
+    Inputs are machine-only T1 segments with exact frame/crop associations.
+    Content replay precedes revision rejection, so a lost successful response can
+    be retried at its original expected_revision, even after later commits.
+    Replays report the current revision and retain the original commit receipt.
+    A changed request_id payload, modified historical evidence, model failure or
+    audit failure rolls back the entire transaction, including match creation.
+    """
+    from app.evaluation.guard import assert_inference_isolation
+
+    assert_inference_isolation("update_dual_stream")
+    for name, value in (("match_id", match_id), ("batch_id", batch_id), ("request_id", request_id)):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{name} must be a nonempty string")
+    if not isinstance(actor, str) or not actor.strip():
+        raise ValueError("actor must be a nonempty string")
+    if type(expected_revision) is not int or expected_revision < 0:
+        raise ValueError("expected_revision must be a nonnegative integer")
+    ordered = tuple(sorted(segments, key=lambda item: item.segment_id))
+    if not ordered:
+        raise ValueError("A dual-stream batch requires at least one segment")
+    matcher = matcher if matcher is not None else IncrementalMatcher()
+    repo = Repository(connection)
+    with transaction(connection):
+        # Both validation and fixed-snapshot planning run under the write lock.
+        SpatioTemporalConstraintEngine(segments=ordered)
+        input_hashes, fingerprint = _dual_stream_input(ordered, extractor)
+        repo.ensure_match(match_id)
+        snapshot = read_dual_stream_snapshot(connection, match_id)
+        prior = find_dual_stream_operation(connection, match_id, request_id=request_id)
+        if prior is not None and prior["input_fingerprint"] != fingerprint:
+            raise StorageConflict("request_id was already used for different input content")
+        if prior is None:
+            prior = find_dual_stream_operation(connection, match_id, input_fingerprint=fingerprint)
+        payload = {
+            "batch_id": batch_id,
+            "input_hashes": input_hashes,
+            "matcher": {
+                key: getattr(matcher, key)
+                for key in (
+                    "distance_threshold",
+                    "competitive_margin",
+                    "min_quality",
+                    "min_prototype_weight",
+                    "max_prototypes",
+                )
+            },
+        }
+        for sid, digest in input_hashes.items():
+            if sid in snapshot.input_hashes and snapshot.input_hashes[sid] != digest:
+                raise StorageConflict(f"Immutable segment content changed: {sid}")
+        fresh = [segment for segment in ordered if segment.segment_id not in snapshot.input_hashes]
+        if prior is not None or not fresh:
+            data = (
+                dict(prior["result"])
+                if prior
+                else {
+                    "committed_revision": snapshot.revision,
+                    "input_fingerprint": fingerprint,
+                }
+            )
+            data["changed"] = False
+            data["summary"] = {**data.get("summary", {}), "idempotent_replay": True}
+            put_dual_stream_operation(connection, match_id, request_id, fingerprint, payload, data)
+            return SuccessResponse(data=data, revision=snapshot.revision)
+        if snapshot.revision != expected_revision:
+            raise RevisionConflict(
+                f"stale match {match_id!r}: expected revision {expected_revision}, "
+                f"current is {snapshot.revision}"
+            )
+
+        extracted = tuple(extractor.extract(segment) for segment in fresh)
+        new_features = {feature.segment_id: feature for feature in extracted}
+        if set(new_features) != {segment.segment_id for segment in fresh}:
+            raise StorageConflict("Extractor returned features for different segments")
+        all_segments = {segment.segment_id: segment for segment in snapshot.segments}
+        all_segments.update((segment.segment_id, segment) for segment in fresh)
+        metadata = tuple(all_segments[sid] for sid in sorted(all_segments))
+        features = {**snapshot.features, **new_features}
+        pending = [
+            snapshot.features[sid]
+            for sid, decision in sorted(snapshot.decisions.items())
+            if decision.outcome == DecisionOutcome.INSUFFICIENT and sid not in new_features
+        ]
+        primary = matcher.plan(
+            extracted,
+            snapshot.players,
+            segments=metadata,
+            batch_id=batch_id,
+            from_revision=snapshot.revision,
+            pending_features=pending,
+            player_assignments=snapshot.assignments,
+        )
+        plan, players, assignments, reassessed = _dual_stream_reassess(
+            snapshot, primary, metadata, features, matcher
+        )
+        _validate_dual_stream_commit(players, assignments, metadata, features)
+        # A crop changed during inference cannot be committed under its old hash.
+        if _dual_stream_input(ordered, extractor)[0] != input_hashes:
+            raise StorageConflict("Input crop bytes changed during feature extraction")
+        put_dual_stream_evidence(
+            connection,
+            match_id,
+            fresh,
+            extracted,
+            {segment.segment_id: input_hashes[segment.segment_id] for segment in fresh},
+        )
+        put_dual_stream_plan(connection, match_id, plan, players=players)
+        summary = {
+            outcome.value: sum(d.outcome == outcome for d in plan.decisions)
+            for outcome in DecisionOutcome
+        }
+        summary["reassessed_segments"] = reassessed
+        summary["cannot_link_edges"] = len(
+            SpatioTemporalConstraintEngine(segments=metadata).constraints
+        )
+        data = {
+            "changed": True,
+            "committed_revision": plan.to_revision,
+            "input_fingerprint": fingerprint,
+            "plan": to_json(plan),
+            "summary": summary,
+        }
+        repo.advance_revision(
+            match_id,
+            expected_revision,
+            actor=actor,
+            reason="dual_stream_incremental",
+            changes={"input_fingerprint": fingerprint, "batch_id": batch_id, **summary},
+        )
+        put_dual_stream_operation(connection, match_id, request_id, fingerprint, payload, data)
+        return SuccessResponse(data=data, revision=plan.to_revision)
