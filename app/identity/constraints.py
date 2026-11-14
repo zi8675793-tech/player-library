@@ -1,17 +1,95 @@
-"""Evidence-based spatial conflicts and conservative overlap safety gates.
+"""Physical-frame hard exclusion for T1 segments and legacy overlap safety gates.
 
-Only persistent, reliable separated observations (or manual constraints) establish
-hard cannot-links. Unresolved overlaps still block automatic merges and matches;
-absence of a hard conflict is not positive evidence of identity.
+T1 segments use exact source/frame cooccurrence, including overlapping boxes.
+The legacy representation API retains its persistent separation evidence policy.
+Unresolved metadata blocks automatic merges and matches in either mode; absence
+of a hard conflict is not positive evidence of identity.
 """
 
 import math
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from app.contracts.evidence import TrackObservation
+from app.features.dual_stream import TrackletSegment
+from app.features.dual_stream import TrackObservation as DualStreamObservation
 from app.identity.representation import TrackRepresentation
+
+
+@dataclass(frozen=True)
+class CannotLinkConstraint:
+    """Frozen T2 contract; segment identifiers denote an unordered hard edge."""
+
+    segment_a: str
+    segment_b: str
+    reason: str
+
+
+def _finite_number(value: Any) -> bool:
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def _validate_dual_stream_segment(segment: TrackletSegment) -> None:
+    """Validate physical frame metadata without opening image or video files."""
+    if not isinstance(segment, TrackletSegment):
+        raise TypeError("Expected the documented T1 TrackletSegment")
+    if (
+        not isinstance(segment.video_id, str)
+        or re.fullmatch(r"[A-Za-z0-9_-]+", segment.video_id) is None
+    ):
+        raise ValueError("video_id must be a nonempty source identifier")
+    for name in ("local_track_id", "start_frame", "end_frame", "observation_count"):
+        value = getattr(segment, name)
+        if type(value) is not int or value < 0:
+            raise ValueError(f"{name} must be a nonnegative integer")
+    if segment.segment_id != (f"{segment.video_id}_{segment.local_track_id}_{segment.start_frame}"):
+        raise ValueError("segment_id must agree with video, track and start frame")
+    if not isinstance(segment.observations, tuple) or not segment.observations:
+        raise ValueError("TrackletSegment must contain a nonempty observation tuple")
+    if segment.observation_count != len(segment.observations):
+        raise ValueError("observation_count disagrees with observations")
+    for observation in segment.observations:
+        if not isinstance(observation, DualStreamObservation):
+            raise TypeError("Expected the documented T1 TrackObservation")
+        if (
+            observation.video_id != segment.video_id
+            or type(observation.local_track_id) is not int
+            or observation.local_track_id != segment.local_track_id
+        ):
+            raise ValueError("Observation source and track must agree with its segment")
+        if type(observation.frame_idx) is not int or observation.frame_idx < 0:
+            raise ValueError("Observation frame_idx must be a nonnegative integer")
+        if not _finite_number(observation.timestamp_s) or observation.timestamp_s < 0:
+            raise ValueError("Observation timestamp_s must be finite and nonnegative")
+        if not _finite_number(observation.confidence) or not 0 <= observation.confidence <= 1:
+            raise ValueError("Observation confidence must be finite and in [0, 1]")
+        box = observation.bbox_xyxy
+        if (
+            not isinstance(box, tuple)
+            or len(box) != 4
+            or not all(_finite_number(value) for value in box)
+            or not (0 <= box[0] < box[2] and 0 <= box[1] < box[3])
+        ):
+            raise ValueError("Observation bbox_xyxy must be a finite ordered nonnegative box")
+    observations = sorted(segment.observations, key=lambda observation: observation.frame_idx)
+    if any(
+        left.frame_idx == right.frame_idx or left.timestamp_s >= right.timestamp_s
+        for left, right in zip(observations, observations[1:])
+    ):
+        raise ValueError("Observation frames and timestamps must strictly increase")
+    first, last = observations[0], observations[-1]
+    for name, expected in (
+        ("start_frame", first.frame_idx),
+        ("end_frame", last.frame_idx),
+        ("start_time_s", first.timestamp_s),
+        ("end_time_s", last.timestamp_s),
+    ):
+        value = getattr(segment, name)
+        if not _finite_number(value) or value != expected:
+            raise ValueError(f"TrackletSegment {name} disagrees with observations")
 
 
 class ForbiddenPairs(set[tuple[int, int]]):
@@ -67,14 +145,18 @@ def _reliable_observation(obs: Any) -> bool:
 class SpatioTemporalConstraintEngine:
     """Separate hard spatial/manual conflicts from unresolved overlap blockers.
 
-    Geometry requires disjoint boxes separated by at least the configured mean
-    box heights in distinct time buckets. All overlap without that evidence stays
-    unresolved, never a negative-identity witness, but still prevents merging.
+    T1 ``segments`` use exact physical frame cooccurrence: different local
+    tracks in one video and frame are hard cannot-links, regardless of box
+    overlap. Frame-index gaps are never filled by interval interpolation.
+
+    The legacy TrackRepresentation API retains its persistent geometry policy:
+    disjoint boxes in distinct time buckets establish conflict; all other time
+    overlap remains unresolved. Mixing these two input contracts is rejected.
     """
 
     def __init__(
         self,
-        tracks: Sequence[TrackRepresentation],
+        tracks: Sequence[TrackRepresentation | TrackletSegment] = (),
         observations: Sequence[TrackObservation | Any] | None = None,
         manual_constraints: Sequence[Any] | None = None,
         player_assignments: Any | None = None,
@@ -83,7 +165,26 @@ class SpatioTemporalConstraintEngine:
         bucket_s: float = 0.5,
         cooccurrence_min_buckets: int = 3,
         cooccurrence_separation_heights: float = 0.5,
+        segments: Sequence[TrackletSegment] | None = None,
     ) -> None:
+        tracks = list(tracks)
+        if segments is not None and tracks:
+            raise ValueError("Supply either tracks or T1 segments, not both")
+        dual_stream_tracks = [isinstance(track, TrackletSegment) for track in tracks]
+        if any(dual_stream_tracks) and not all(dual_stream_tracks):
+            raise TypeError("Cannot mix T1 TrackletSegment and legacy track representations")
+        self._dual_stream_mode = segments is not None or any(dual_stream_tracks)
+        if self._dual_stream_mode:
+            if observations:
+                raise ValueError("T1 segments carry their own physical observations")
+            self._init_dual_stream(
+                list(segments) if segments is not None else tracks,
+                manual_constraints,
+                player_assignments,
+                segments_by_id,
+            )
+            return
+        self.constraints: tuple[CannotLinkConstraint, ...] = ()
         for name, value in (
             ("bucket_s", bucket_s),
             ("cooccurrence_separation_heights", cooccurrence_separation_heights),
@@ -126,6 +227,88 @@ class SpatioTemporalConstraintEngine:
                     self.forbidden_pairs.add((i, j))
                 elif relation == "unresolved":
                     self._unresolved_pairs.add((i, j))
+
+    @classmethod
+    def from_segments(
+        cls, segments: Sequence[TrackletSegment], **kwargs: Any
+    ) -> "SpatioTemporalConstraintEngine":
+        """Build the T2 physical-frame graph, including for an empty batch."""
+        return cls(segments=segments, **kwargs)
+
+    def _init_dual_stream(
+        self,
+        segments: Sequence[TrackletSegment],
+        manual_constraints: Sequence[Any] | None,
+        player_assignments: Any,
+        segments_by_id: Any,
+    ) -> None:
+        self.tracks = list(segments)
+        self.manual_constraints = list(manual_constraints or ())
+        self.player_assignments = dict(player_assignments or {})
+        self.segments_by_id = {}
+        for segment in segments:
+            _validate_dual_stream_segment(segment)
+            if segment.segment_id in self.segments_by_id:
+                raise ValueError(f"Duplicate segment_id: {segment.segment_id}")
+            self.segments_by_id[segment.segment_id] = segment
+        for segment_id, segment in dict(segments_by_id or {}).items():
+            _validate_dual_stream_segment(segment)
+            if segment_id != segment.segment_id:
+                raise ValueError("segments_by_id keys must agree with segment identifiers")
+            previous = self.segments_by_id.get(segment_id)
+            if previous is not None and previous != segment:
+                raise ValueError(f"Conflicting segment metadata: {segment_id}")
+            self.segments_by_id[segment_id] = segment
+
+        by_frame: dict[tuple[str, int], dict[int, set[str]]] = defaultdict(lambda: defaultdict(set))
+        self.observations = []
+        for segment in self.segments_by_id.values():
+            for observation in segment.observations:
+                self.observations.append(observation)
+                by_frame[segment.video_id, observation.frame_idx][segment.local_track_id].add(
+                    segment.segment_id
+                )
+        edges: dict[tuple[str, str], CannotLinkConstraint] = {}
+        for occupants in by_frame.values():
+            tracks = list(occupants.values())
+            for index, left in enumerate(tracks):
+                for right in tracks[index + 1 :]:
+                    for segment_a in left:
+                        for segment_b in right:
+                            a, b = sorted((segment_a, segment_b))
+                            edges[a, b] = CannotLinkConstraint(
+                                a, b, "same_frame_spatial_separation"
+                            )
+        for constraint in self.manual_constraints:
+            if isinstance(constraint, CannotLinkConstraint):
+                a, b = constraint.segment_a, constraint.segment_b
+                reason = constraint.reason
+            elif _field(constraint, "kind") == "cannot_link":
+                a, b = _field(constraint, "segment_id"), _field(constraint, "related_segment_id")
+                reason = "manual_cannot_link"
+            else:
+                continue
+            if isinstance(a, str) and isinstance(b, str) and a != b:
+                a, b = sorted((a, b))
+                edges[a, b] = CannotLinkConstraint(a, b, reason)
+        self.constraints = tuple(edges[key] for key in sorted(edges))
+        self._segment_edges = frozenset(edges)
+        self.forbidden_pairs = ForbiddenPairs()
+        self._unresolved_pairs = ForbiddenPairs()
+        indices = {segment.segment_id: index for index, segment in enumerate(self.tracks)}
+        for a, b in edges:
+            if a in indices and b in indices:
+                self.forbidden_pairs.add((indices[a], indices[b]))
+
+    def cannot_link(self, segment_a: str | Any, segment_b: str | Any) -> bool:
+        """Query an unordered hard edge in constant time for T1 segment IDs."""
+        return self.pair_relation(segment_a, segment_b) == "conflict"
+
+    def constrained_distance(
+        self, segment_a: str | Any, segment_b: str | Any, distance: float
+    ) -> float:
+        """Preserve distance only for physically clear pairs; fail closed otherwise."""
+        return distance if self.pair_relation(segment_a, segment_b) == "clear" else math.inf
 
     def _segment(self, segment: Any) -> Any:
         if isinstance(segment, str):
@@ -172,6 +355,16 @@ class SpatioTemporalConstraintEngine:
         exemptions. Missing segment metadata fails closed as unresolved. 'clear'
         means no spatial blocker, not proof that the segments are the same person.
         """
+        if self._dual_stream_mode:
+            sid_a = segment_a if isinstance(segment_a, str) else _field(segment_a, "segment_id")
+            sid_b = segment_b if isinstance(segment_b, str) else _field(segment_b, "segment_id")
+            if not isinstance(sid_a, str) or not isinstance(sid_b, str):
+                return "unresolved"
+            if tuple(sorted((sid_a, sid_b))) in self._segment_edges:
+                return "conflict"
+            if sid_a not in self.segments_by_id or sid_b not in self.segments_by_id:
+                return "unresolved"
+            return "clear"
         left, right = self._segment(segment_a), self._segment(segment_b)
         sid_a = segment_a if isinstance(segment_a, str) else _field(segment_a, "segment_id")
         sid_b = segment_b if isinstance(segment_b, str) else _field(segment_b, "segment_id")
