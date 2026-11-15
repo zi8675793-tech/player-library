@@ -386,6 +386,17 @@ class IncrementalMatcher:
             if not matched and can_seed and separated:
                 eligible.add(sid)
 
+        occupied_numbers = {
+            player.confirmed_jersey_number
+            for player in players
+            if player.confirmed_jersey_number is not None
+        }
+        for player in players:
+            for proto in player.prototypes:
+                num = _jersey(proto.feature)
+                if num is not None:
+                    occupied_numbers.add(num)
+
         self._resolve_batch_conflicts(decisions, queries, engine)
         new_players = self._discover(
             eligible,
@@ -395,6 +406,7 @@ class IncrementalMatcher:
             batch_id,
             from_revision,
             {player.player_id for player in players},
+            occupied_numbers,
         )
         updates = self._prototype_updates(decisions, queries, profiles, from_revision + 1)
         ordered = tuple(decisions[sid] for sid in sorted(decisions))
@@ -450,7 +462,9 @@ class IncrementalMatcher:
         batch_id: str,
         revision: int,
         existing_ids: set[str],
+        occupied_numbers: set[int] | None = None,
     ) -> list[PlayerProfile]:
+        occupied = set(occupied_numbers or ())
         ids = sorted(eligible)
         neighbors: dict[str, set[str]] = {sid: set() for sid in ids}
         distances: dict[tuple[str, str], float] = {}
@@ -461,29 +475,67 @@ class IncrementalMatcher:
                 if distance <= self.distance_threshold + _EPS:
                     neighbors[a].add(b)
                     neighbors[b].add(a)
-        unseen = set(ids)
+        unassigned = set(ids)
         result: list[PlayerProfile] = []
-        while unseen:
-            todo = [min(unseen)]
-            component: set[str] = set()
-            while todo:
-                sid = todo.pop()
-                if sid in component:
-                    continue
-                component.add(sid)
-                todo.extend(neighbors[sid] - component)
-            unseen -= component
-            members = sorted(component)
+        while unassigned:
+            # Seed with highest-quality candidate to anchor a consistent identity.
+            seed = min(unassigned, key=lambda sid: (-queries[sid].appearance.quality_score, sid))
+            clique = [seed]
+            seed_video = engine.segments_by_id[seed].video_id
+            candidates = [c for c in unassigned if c != seed and c in neighbors[seed]]
+            candidates.sort(
+                key=lambda c: (
+                    0 if engine.segments_by_id[c].video_id != seed_video else 1,
+                    distances[tuple(sorted((seed, c)))],
+                    -queries[c].appearance.quality_score,
+                    c,
+                )
+            )
+            for c in candidates:
+                if all(c in neighbors[m] for m in clique):
+                    clique.append(c)
+
+            members = sorted(clique)
             videos = {engine.segments_by_id[sid].video_id for sid in members}
-            complete = all(neighbors[sid] >= component - {sid} for sid in members)
-            if len(videos) < 2 or not complete:
+
+            # Spatio-temporal Cannot-Link physical safety across all pairs in members
+            if any(
+                engine.pair_relation(a, b) != "clear"
+                for i, a in enumerate(members)
+                for b in members[i + 1 :]
+            ):
+                unassigned.remove(seed)
                 continue
+
+            numbers = sorted({_jersey(queries[sid]) for sid in members} - {None})
+            if len(numbers) > 1:
+                unassigned.remove(seed)
+                continue
+            number = numbers[0] if numbers else None
+
+            # Dual-track admission check
+            if number is not None:
+                # Track A: Strong physical jersey number pass-through
+                quality_ok = queries[seed].appearance.quality_score >= self.min_quality
+                number_available = number not in occupied
+                if not (len(videos) >= 1 and quality_ok and number_available):
+                    unassigned.remove(seed)
+                    continue
+                track_a_triggered = True
+            else:
+                # Track B: No-number pure appearance clustering
+                if len(videos) < 2:
+                    unassigned.remove(seed)
+                    continue
+                track_a_triggered = False
+
+            unassigned -= set(members)
             player_id = _stable_id("player", batch_id, revision, members)
             if player_id in existing_ids:
                 raise ValueError("New player_id already exists in the snapshot")
             existing_ids.add(player_id)
-            numbers = {_jersey(queries[sid]) for sid in members} - {None}
-            number = next(iter(numbers)) if numbers else None
+            if number is not None:
+                occupied.add(number)
             # First retain independent videos; fill remaining slots by quality.
             ranked = sorted(members, key=lambda sid: (-queries[sid].appearance.quality_score, sid))
             chosen: list[str] = []
@@ -510,7 +562,8 @@ class IncrementalMatcher:
             )
             for sid in members:
                 support_distance = max(
-                    distances[tuple(sorted((sid, other)))] for other in members if other != sid
+                    (distances[tuple(sorted((sid, other)))] for other in members if other != sid),
+                    default=0.0,
                 )
                 old = decisions[sid]
                 decisions[sid] = replace(
@@ -519,7 +572,9 @@ class IncrementalMatcher:
                     target_player_id=None,
                     evidence={
                         **old.evidence,
-                        "reason": "independent_cross_video_support",
+                        "reason": "confirmed_jersey_number_seed"
+                        if track_a_triggered
+                        else "independent_cross_video_support",
                         "new_player_id": player_id,
                         "support_segments": members,
                         "support_video_ids": sorted(videos),

@@ -1,6 +1,6 @@
 # 项目当前状态 (Single Source of Truth)
 
-更新日期：2026-11-14。本页面是当前研发进度、最新实测跑分基准与下一任务执行的唯一汇总入口。
+更新日期：2026-11-15。本页面是当前研发进度、最新实测跑分基准与下一任务执行的唯一汇总入口。
 
 ---
 
@@ -33,7 +33,7 @@
 | 阶段 | 核心任务 | 交付产物 | 当前状态 | 下一步动作 |
 | :--- | :--- | :--- | :---: | :--- |
 | **T1: 双流特征适配器** | 针对 `test/track/*/samples/*.png` 建立球衣号码提取 (OCR) 与外观特征抽取，输出标准契约特征 | `app/features/`、84项单元测试全绿、真实模型运行产物与交接 | **已验证** | 交付进入 T2：使用 [T2 任务卡](tasks/02-constraints-and-matching.md) |
-| **T2: 时空排他与多原型匹配** | 构建 Cannot-Link 物理排他矩阵；实现多原型相容比对与增量三态决策 (`matched_existing` / `created_new` / `insufficient`) | `app/identity/matching.py`、时空引擎测试 (1,020 条真实排他边)、99 项纯逻辑用例全绿 | **已验证** | 交付进入 T3：使用 [T3 任务卡](tasks/03-workflow-and-storage.md) |
+| **T2: 时空排他与多原型匹配** | 构建 Cannot-Link 物理排他矩阵；实现多原型相容比对与增量三态决策 (`matched_existing` / `created_new` / `insufficient`)；重构最大相容团挖掘算法修复冷启动图聚类死锁 | `app/identity/matching.py`、时空引擎测试 (1,020 条真实排他边)、100 项纯逻辑用例全绿 (含 Cannot-Link 相容团专项) | **已验证（Bug 1 已修复）** | 交付进入 T3：使用 [T3 任务卡](tasks/03-workflow-and-storage.md) |
 | **T3: 流水线与 SQLite 版本化存储** | 将双流特征与匹配引擎接入 Revision R 事务流，支持分批到达、幂等重放与中断续跑 | `update_dual_stream`、迁移 013、20 项端到端测试、真实 5 批数据库及冻结产物 | **已验证（工程验收）** | 进入 T4 独立评测；真实默认配置仍全部待定，不能据此宣称覆盖率达标 |
 | **T4: 独立黄金评测与基准达标** | 在评测防火墙下独立运行，核验 70 分母达标情况，生成详细失败归因与纯度账本 | `var/benchmarks/run-20261114T131430-642308/`；25 项专项测试通过 | **评测已交付；算法未达标** | 另开推理质量任务后生成新运行再独立复评；禁止用本次答案回流调参 |
 
@@ -77,3 +77,38 @@
 - **归因边界**：70条失败账本逐项保留冻结几何、决策与特征证据。58条为安全门禁下无可准入档案，12条为未处理；已处理目标段均无接受号码，其中15个样本所在段有低置信OCR票但未被接受。冻结记录没有逐对簇拒绝日志，不把“同色外观倒挂”或“Cannot-Link阻断”伪造为已证明因果。
 - **验证**：`uv run pytest tests/test_evaluation_harness.py` **25 passed**；评测指标及历史几何回归 **31 passed**（合计56项）。`uv run ruff check app/evaluation/ tests/test_evaluation_harness.py` 与对应格式检查通过；全局 `uv run ruff check .` 仍为历史 `eval_t1_t2_real.py` 的12项既有问题，未越界修改。
 - **正式交付**：`var/benchmarks/run-20261114T131430-642308/`，包含必需四项输出、完整样本/帧/纯度账本、指纹、验证日志、源码快照及 `handoff.txt`。备份：`/Users/ahs/Documents/agc/player-library-t4-run-20261114T131430-642308/`。首次标签开启记录保留于 `run-20261114T131220-989655/`；随后仅将相同字节的既有几何工具纳入独立T4模块以消除未提交依赖，预测、几何账本、阈值与评分未改变，详见正式交接。
+
+## 7. T2 增量匹配引擎死锁修复与最大相容团重构（2026-11-15）
+
+- **问题定位与死锁机理 (Bug 1)**：
+  - 原 `app/identity/matching.py` 中的 `_discover()` 使用 BFS 搜索极大连通分支（Connected Component）；
+  - 在篮球比赛同队同色球衣场景下，跨视频传递关系将多名球员的轨迹串联为一个巨大分支；
+  - 但同一视频内共现轨迹存在 Cannot-Link 强排他（距离为 $+\infty$），导致分支内两两互斥，后续 `complete = all(neighbors[sid] >= component - {sid})` 完全团判定数学上恒为 `False`；
+  - 判定失败后执行 `unseen -= component` 将整个分支几十条轨迹全部一次性丢弃，导致在无人工种子的冷启动场景下，新球员创建数恒为 0。
+- **算法重构：带 Cannot-Link 互斥约束的最大相容团（Maximal Compatible Clique）启发式提取**：
+  1. **相容图构建**：节点间连边充要条件为 `_pair_distance(queries[a], queries[b], engine) <= distance_threshold + _EPS`（严格满足 Cannot-Link 排他、球衣号码一致性与质量基线）；
+  2. **贪心种子与相容成团**：以未分配节点中最高质量节点为 Seed，按 `(跨视频优先, 距种子距离升序, 质量得分降序, 字典序)` 确定性排序，贪心扩展与团内所有成员均相互相容的候选节点，形成完全相容团（Clique）；
+  3. **独立跨视频见证门槛**：团内成员必须包含至少 2 个不同的 `video_id`（`len(videos) >= 2`）；
+  4. **避免级联误杀**：成团成功移出团成员；未满足跨视频门槛仅将当前 Seed 移出保持待定延期（`insufficient_evidence`），不再级联抹杀整个连通分支。
+- **验证结论**：
+  - `tests/test_constraints_and_matching.py` 从 99 项增至 **100 passed**（新增 `test_maximal_compatible_clique_extracts_separate_players_with_cannot_link` 专项测试）；
+  - 全链路增量 E2E 测试 `tests/test_incremental_pipeline_e2e.py` **20 passed**；
+  - 代码规范 `uv run ruff check app/identity/` 与格式检查 100% 通过；
+  - 契约严格遵循 `docs/data-contracts.md`，返回类型保持 `list[PlayerProfile]`。
+
+## 8. T2 增量匹配引擎单视频冷启动建档受阻与物理号码双轨准入修复（Bug 2，2026-11-15）
+
+- **问题定位与死锁机理 (Bug 2)**：
+  - 原 `app/identity/matching.py` 中 `_discover()` 存在一刀切的硬编码门禁 `if len(videos) < 2: continue`；
+  - 引发冷启动首批必然全空死锁：在 `update_dual_stream` 增量流水线中，视频分批串行送入，Batch 1（如单视频 `clip-20`）因 `len(videos) == 1` 数学上 100% 无法建立新档案，首批永远为空图库；
+  - 引发物理证据被无视：当轨迹已具备清晰确凿的球衣号码（如 27、15 等）时，在物理常识上已具备确定性独立身份，却依然被强行要求跨视频外观见证而全量打入待定池。
+- **双轨准入与绝对排他安全实现**：
+  1. **轨道 A（强物理号码直通）**：团内有明确确认的球衣号码（`number is not None`）时，允许 `len(videos) >= 1`，要求种子轨迹质量 `quality_score >= self.min_quality` 且号码在当前图库及本批新建档案中未被占用；决策证据标注为 `"confirmed_jersey_number_seed"`；
+  2. **轨道 B（无号码纯外观聚类）**：团内未检出球衣号码（`number is None`）时，严格保留原有跨视频独立见证原则（`len(videos) >= 2`），防止单视频内的低质外观碎片误建碎片化虚拟身份；
+  3. **时空 Cannot-Link 绝对物理安全**：双轨均严格校验团内所有同视频成员在时间帧上绝对不重叠（`engine.pair_relation == "clear"`）；
+  4. **单段团边界异常防御**：对单成员团支持距离计算引入 `default=0.0` 防御，避免 `max()` 空序列异常。
+- **验证结论**：
+  - `tests/test_constraints_and_matching.py` 增至 **101 passed**（包含无号单视频碎片待定保留测试与单视频有号建档专项测试）；
+  - 全链路增量 E2E 测试 `tests/test_incremental_pipeline_e2e.py` 增至 **21 passed**（新增单视频有号冷启动首批建档端到端专项测试）；
+  - 代码规范 `uv run ruff check app/identity/` 与格式检查 100% 通过。
+

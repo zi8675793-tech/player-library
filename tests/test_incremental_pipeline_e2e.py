@@ -155,7 +155,7 @@ def test_sequential_batches_resolve_pending_and_expand_prototypes(pipeline):
     for revision, (video, prototype_count) in enumerate(
         zip((20, 6, 43, 50, 68), expected_sizes, strict=True), start=1
     ):
-        segment = pipeline.segment(video)
+        segment = pipeline.segment(video, number=None if revision == 1 else 27)
         result = pipeline.submit([segment], expected=revision - 1)
         snapshot = pipeline.snapshot()
         assert result.data["changed"] is True
@@ -375,7 +375,7 @@ def test_reopen_restores_float32_features_and_canonical_profile_ids(pipeline):
 
 
 def test_historical_snapshots_keep_pending_resolution_and_prototype_versions(pipeline):
-    first = pipeline.segment(20)
+    first = pipeline.segment(20, number=None)
     pipeline.submit([first], expected=0)
     pipeline.submit([pipeline.segment(6)], expected=1)
     pipeline.submit([pipeline.segment(43)], expected=2)
@@ -518,7 +518,7 @@ def test_cannot_link_uses_all_history_across_batches(pipeline):
     first = [pipeline.segment(20), pipeline.segment(6)]
     pipeline.submit(first, expected=0)
     player_id = pipeline.snapshot().players[0].player_id
-    conflicting = pipeline.segment(20, track=2, x=200)
+    conflicting = pipeline.segment(20, track=2, x=200, number=None)
     pipeline.submit([conflicting], expected=1)
     snapshot = pipeline.snapshot()
     assert conflicting.segment_id not in snapshot.assignments
@@ -527,7 +527,7 @@ def test_cannot_link_uses_all_history_across_batches(pipeline):
         segments=snapshot.segments, player_assignments=snapshot.assignments
     )
     assert engine.is_segment_forbidden_for_player(conflicting.segment_id, player_id)
-    pipeline.submit([pipeline.segment(6, track=2, x=200)], expected=2)
+    pipeline.submit([pipeline.segment(6, track=2, x=200, number=None)], expected=2)
     snapshot = pipeline.snapshot()
     assert len(snapshot.players) == 2
     assert snapshot.assignments[conflicting.segment_id] != player_id
@@ -544,7 +544,7 @@ def test_jersey_conflict_never_pollutes_same_appearance_profile(pipeline):
     original_player = pipeline.snapshot().players[0].player_id
     other = pipeline.segment(43, number=10)
     pipeline.submit([other], expected=1)
-    assert other.segment_id not in pipeline.snapshot().assignments
+    assert pipeline.snapshot().assignments[other.segment_id] != original_player
     pipeline.submit([pipeline.segment(50, number=10)], expected=2)
     snapshot = pipeline.snapshot()
     assert snapshot.assignments[other.segment_id] != original_player
@@ -553,6 +553,22 @@ def test_jersey_conflict_never_pollutes_same_appearance_profile(pipeline):
         assert {p.feature.jersey.number for p in player.prototypes} == {
             player.confirmed_jersey_number
         }
+
+
+def test_single_video_numbered_batch_creates_player_at_cold_start(pipeline):
+    segment = pipeline.segment(20, number=27)
+    result = pipeline.submit([segment], expected=0)
+    snapshot = pipeline.snapshot()
+    assert result.data["changed"] is True
+    assert result.revision == 1
+    assert len(snapshot.players) == 1
+    player = snapshot.players[0]
+    assert player.confirmed_jersey_number == 27
+    assert snapshot.decisions[segment.segment_id].outcome == DecisionOutcome.CREATED_NEW
+    assert (
+        snapshot.decisions[segment.segment_id].evidence["reason"] == "confirmed_jersey_number_seed"
+    )
+    assert snapshot.assignments[segment.segment_id] == player.player_id
 
 
 def test_jersey_safety_checks_assigned_evidence_when_prototype_capacity_is_full(pipeline):

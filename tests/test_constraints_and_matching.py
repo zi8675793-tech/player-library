@@ -249,8 +249,11 @@ def test_readable_different_number_vetoes_identical_appearance(number):
     old, query = segment("old"), segment("new")
     player = profile(prototype(feature(old, number=27)), number=27)
     result = plan([feature(query, number=number)], [player], segments=[old, query])
-    assert_deferred(result, query)
+    assert result.decisions[0].target_player_id is None
     assert math.isinf(result.decisions[0].best_distance)
+    assert len(result.new_players) == 1
+    assert result.new_players[0].confirmed_jersey_number == number
+    assert result.decisions[0].outcome == DecisionOutcome.CREATED_NEW
 
 
 def test_unreadable_number_falls_back_to_appearance():
@@ -271,7 +274,11 @@ def test_readable_number_does_not_have_a_second_hidden_confidence_gate():
     old, query = segment("old"), segment("new")
     player = profile(prototype(feature(old, number=27)), number=27)
     result = plan([feature(query, number=10, confidence=0.1)], [player], segments=[old, query])
-    assert_deferred(result, query)
+    assert result.decisions[0].target_player_id is None
+    assert math.isinf(result.decisions[0].best_distance)
+    assert len(result.new_players) == 1
+    assert result.new_players[0].confirmed_jersey_number == 10
+    assert result.decisions[0].outcome == DecisionOutcome.CREATED_NEW
 
 
 def test_matching_number_does_not_override_bad_appearance():
@@ -476,9 +483,20 @@ def test_conflicting_numbers_in_one_batch_cannot_match_an_unnumbered_profile():
 
 def test_isolated_segment_defers_instead_of_creating_a_fragment():
     query = segment()
-    result = plan([feature(query, number=27)], segments=[query])
+    result = plan([feature(query)], segments=[query])
     assert_deferred(result, query)
     assert not result.new_players
+
+
+def test_isolated_segment_with_confirmed_number_creates_player():
+    query = segment()
+    result = plan([feature(query, number=27)], segments=[query])
+    assert len(result.new_players) == 1
+    player = result.new_players[0]
+    assert player.confirmed_jersey_number == 27
+    assert result.decisions[0].outcome == DecisionOutcome.CREATED_NEW
+    assert result.decisions[0].evidence["reason"] == "confirmed_jersey_number_seed"
+    assert result.decisions[0].evidence["new_player_id"] == player.player_id
 
 
 def test_two_cross_video_witnesses_create_one_new_profile_and_link_decisions():
@@ -547,8 +565,12 @@ def test_pending_pool_supplies_independent_witness_from_an_earlier_batch():
 def test_different_jersey_numbers_cannot_form_a_new_identity_cluster():
     first, second = segment("a"), segment("b")
     result = plan([feature(first, number=10), feature(second, number=27)], segments=[first, second])
-    assert_deferred(result, first, second)
-    assert not result.new_players
+    assert len(result.new_players) == 2
+    assert {p.confirmed_jersey_number for p in result.new_players} == {10, 27}
+    assert (
+        result.decisions[0].evidence["new_player_id"]
+        != result.decisions[1].evidence["new_player_id"]
+    )
 
 
 def test_different_models_cannot_form_a_new_identity_cluster():
@@ -807,3 +829,43 @@ def test_zero_quality_cannot_add_an_unusable_prototype_to_existing_player():
         matcher=IncrementalMatcher(min_quality=0, min_prototype_weight=0),
     )
     assert not result.updated_prototypes
+
+
+def test_maximal_compatible_clique_extracts_separate_players_with_cannot_link():
+    # In v1, track 1 and track 2 co-occur (cannot-link).
+    # In v2, track 1 and track 2 co-occur (cannot-link).
+    # Transitive appearance connects all 4 into one connected component, but each
+    # player must form a separate compatible clique across the 2 videos.
+    p1_v1 = segment(video="v1", track=1, frames=(0, 1, 2))
+    p2_v1 = segment(video="v1", track=2, frames=(0, 1, 2), x=100.0)
+    p1_v2 = segment(video="v2", track=1, frames=(0, 1, 2))
+    p2_v2 = segment(video="v2", track=2, frames=(0, 1, 2), x=100.0)
+
+    def vec(angle):
+        v = np.zeros(512, dtype=np.float32)
+        v[0] = math.cos(angle)
+        v[1] = math.sin(angle)
+        return v
+
+    parts = [p1_v1, p2_v1, p1_v2, p2_v2]
+    features = [
+        feature(p1_v1, vector=vec(0.0)),
+        feature(p2_v1, vector=vec(0.4)),
+        feature(p1_v2, vector=vec(0.1)),
+        feature(p2_v2, vector=vec(0.45)),
+    ]
+    result = plan(features, segments=parts)
+    assert len(result.new_players) == 2
+    groups = {
+        item.evidence["new_player_id"]: set()
+        for item in result.decisions
+        if item.outcome == DecisionOutcome.CREATED_NEW
+    }
+    for item in result.decisions:
+        assert item.outcome == DecisionOutcome.CREATED_NEW
+        groups[item.evidence["new_player_id"]].add(item.segment_id)
+
+    assert {frozenset(g) for g in groups.values()} == {
+        frozenset({p1_v1.segment_id, p1_v2.segment_id}),
+        frozenset({p2_v1.segment_id, p2_v2.segment_id}),
+    }
