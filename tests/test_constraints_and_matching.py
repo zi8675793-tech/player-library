@@ -869,3 +869,62 @@ def test_maximal_compatible_clique_extracts_separate_players_with_cannot_link():
         frozenset({p1_v1.segment_id, p1_v2.segment_id}),
         frozenset({p2_v1.segment_id, p2_v2.segment_id}),
     }
+
+
+def test_matching_jersey_number_activates_appearance_discount_for_gallery_match():
+    """Bug 4: Identical jersey numbers with compatible appearance (<= 0.45) receive 0.5x distance discount."""
+    old, query = segment("v1", track=1), segment("v2", track=1)
+    player = profile(prototype(feature(old, number=27, distance=0.0)), number=27)
+    # Raw cosine distance is 0.28, which exceeds the default threshold 0.25.
+    # With identical jersey number 27 and raw_dist <= 0.45, discounted distance becomes 0.14.
+    result = plan([feature(query, number=27, distance=0.28)], [player], segments=[old, query])
+    assert result.decisions[0].outcome == DecisionOutcome.MATCHED_EXISTING
+    assert result.decisions[0].target_player_id == player.player_id
+    assert result.decisions[0].best_distance == pytest.approx(0.14, abs=1e-5)
+
+
+def test_matching_jersey_number_discounts_lateral_unreadable_prototype_under_player_profile():
+    """Bug 4: Lateral/dorsal prototype without readable number also enjoys discount if player confirmed number matches query."""
+    old, query = segment("v1", track=1), segment("v2", track=1)
+    # Prototype feature has number=None (e.g. side angle view), but player confirmed number is 27.
+    proto = prototype(feature(old, number=None, distance=0.0), view="lateral")
+    player = profile(proto, number=27)
+
+    # 1. Query has confirmed number 27 and raw distance 0.28 -> discounted to 0.14 -> MATCHED_EXISTING
+    result_with_num = plan(
+        [feature(query, number=27, distance=0.28)], [player], segments=[old, query]
+    )
+    assert result_with_num.decisions[0].outcome == DecisionOutcome.MATCHED_EXISTING
+    assert result_with_num.decisions[0].target_player_id == player.player_id
+    assert result_with_num.decisions[0].best_distance == pytest.approx(0.14, abs=1e-5)
+
+    # 2. Query has no number (number=None) -> pure appearance fallback (no discount) -> 0.28 > 0.25 -> INSUFFICIENT
+    result_no_num = plan(
+        [feature(query, number=None, distance=0.28)], [player], segments=[old, query]
+    )
+    assert result_no_num.decisions[0].outcome == DecisionOutcome.INSUFFICIENT
+    assert result_no_num.decisions[0].target_player_id is None
+    assert result_no_num.decisions[0].best_distance == pytest.approx(0.28, abs=1e-5)
+
+
+def test_matching_jersey_number_does_not_discount_when_appearance_diverges():
+    """Bug 4 safety gate: Raw appearance distance > 0.45 does not get discounted even with matching jersey numbers."""
+    old, query = segment("v1", track=1), segment("v2", track=1)
+    player = profile(prototype(feature(old, number=27, distance=0.0)), number=27)
+    # Raw distance is 0.48 (> 0.45, divergent appearance) -> no discount applied.
+    result = plan([feature(query, number=27, distance=0.48)], [player], segments=[old, query])
+    assert result.decisions[0].outcome == DecisionOutcome.INSUFFICIENT
+    assert result.decisions[0].target_player_id is None
+    assert result.decisions[0].best_distance == pytest.approx(0.48, abs=1e-5)
+
+
+def test_matching_jersey_number_boosts_discovery_clique():
+    """Bug 4: Cross-video pair with identical numbers and raw distance 0.28 forms a clique via discounted distance 0.14."""
+    s1 = segment("v1", track=1)
+    s2 = segment("v2", track=1)
+    f1 = feature(s1, number=27, distance=0.0)
+    f2 = feature(s2, number=27, distance=0.28)
+    result = plan([f1, f2], segments=[s1, s2])
+    assert len(result.new_players) == 1
+    assert result.new_players[0].confirmed_jersey_number == 27
+    assert {d.outcome for d in result.decisions} == {DecisionOutcome.CREATED_NEW}

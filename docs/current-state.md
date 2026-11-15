@@ -132,3 +132,27 @@
   - 代码规范 `uv run ruff check app/features/` 与格式检查 100% 通过；
   - **真实切片复核通过**：针对 `test/track/20/samples/` 和 `test/track/6/samples/` 真实切片复核，高置信度 15 号（Clip 20 T00002 conf=0.980）、23 号（Clip 20 T00001 conf=0.973）、28 号（Clip 6 T00001 conf=0.917）、10 号（Clip 20 T00005 conf=0.983，Clip 6 T00008 conf=0.995）全部准确识别，彻底终结全量退化为 `None` 的致命缺陷。
 
+## 10. T2 增量匹配引擎球衣号码正向加权与相容外观加权折减修复（Bug 4，2026-11-15）
+
+- **问题定位与强先验架空机理 (Bug 4)**：
+  - 原 `app/identity/matching.py` 中的 `_pair_distance` 仅实现了号码不符时的一票否决（`a != b -> math.inf`）；
+  - 当号码完全相符时（`a == b`），代码原封不动返回原始余弦距离 `_cosine(left, right)`，没有任何加权或折减；
+  - 同样在 `_player_score` 中，即时候选段号码与目标球员确认号码一致，若两者外观因姿态、背光或光照波动达到 0.28（略高于阈值 0.25），依然被判定为待定（`insufficient_evidence`）拒之门外；
+  - 强物理证据退化为“只能用于否决，不能用于肯定”的单向死规矩，系统总体架构白纸黑字规定的“若号码完全相同且外观颜色空间高度相容，赋予极高匹配加权（一票通过强先验）”被彻底架空。
+- **正向加权算法与安全防御体系**：
+  1. **`_pair_distance` 相容号码加权折减**：
+     当两段轨迹均具备确凿号码且相同（`a is not None and b is not None and a == b`）时，计算原始外观余弦距离 `raw_dist`；
+     仅当处于相容外观区间（`raw_dist <= 0.45`）时激活正向折减：
+     $$\text{dist} = \text{raw\_dist} \times 0.5$$
+     若原始外观严重偏离（`raw_dist > 0.45`，如不同队服颜色或噪点），不予折减，保持原距离防冒进。
+  2. **`_player_score` 多原型图库对齐与侧身视角融合**：
+     若候选段号码与球员档案号码相符（`player.confirmed_jersey_number == _jersey(query)`），即使比对的历史原型因侧身或背面角度未检出号码（`_jersey(proto) is None`），在相容外观区间（`raw_dist <= 0.45`）同样享受 $0.5\times$ 距离折减，确保侧身/背身高质原型与新带号轨迹平稳融合；
+  3. **物理绝对安全守住底线**：
+     时空 Cannot-Link（同一视频同一帧共现）无论号码是否相同，均强制阻断为 `math.inf`；极差外观（`raw_dist = 1.0`）无法被折减穿透；候选段无号码时平滑降级至纯外观比对，不享受折减。
+- **验证结论**：
+  - `tests/test_constraints_and_matching.py` 从 101 项增至 **105 passed**（新增相容号码加权折减、档案下侧身无号原型加权融合、外观偏离防穿透、冷启动带号成团 4 项专项测试）；
+  - 全量测试套件 `uv run pytest tests/ -q` **1038 passed, 1 skipped**；
+  - 增量流水线与回归测试 `tests/test_incremental_pipeline_e2e.py` **21 passed**；
+  - 代码规范 `uv run ruff check app/identity/` 与格式检查 100% 通过；
+  - **逻辑验证确认**：两段号码均为 27、原始余弦距离为 0.28（超标 0.25）的轨迹，在新逻辑下折减为 0.14，稳健归入 27 号球员档案。
+

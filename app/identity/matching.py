@@ -46,6 +46,12 @@ from app.identity.constraints import SpatioTemporalConstraintEngine
 
 _EPS = 1e-7  # Float32 embedding precision at inclusive distance/margin boundaries.
 _VIEWS = {"frontal", "dorsal_with_number", "lateral", "generic"}
+_COMPATIBLE_APPEARANCE_MAX_DISTANCE = (
+    0.45  # Upper bound for compatible appearance to activate jersey number bonus.
+)
+_MATCHING_NUMBER_DISTANCE_FACTOR = (
+    0.5  # Positive matching discount when confirmed jersey numbers agree.
+)
 
 
 @dataclass(frozen=True)
@@ -271,7 +277,15 @@ class IncrementalMatcher:
             or engine.pair_relation(left.segment_id, right.segment_id) != "clear"
         ):
             return math.inf
-        return _cosine(left, right)
+        raw_dist = _cosine(left, right)
+        if (
+            a is not None
+            and b is not None
+            and a == b
+            and raw_dist <= _COMPATIBLE_APPEARANCE_MAX_DISTANCE
+        ):
+            return raw_dist * _MATCHING_NUMBER_DISTANCE_FACTOR
+        return raw_dist
 
     def _player_score(
         self,
@@ -296,13 +310,27 @@ class IncrementalMatcher:
             return math.inf, "cannot_link"
         if "unresolved" in relations:
             return math.inf, "missing_history"
-        distances = [
-            self._pair_distance(query, proto.feature, engine)
-            for proto in player.prototypes
-            if proto.feature.segment_id != query.segment_id
-            and proto.weight > 0
-            and proto.weight >= self.min_prototype_weight
-        ]
+        query_number = _jersey(query)
+        match_number = query_number is not None and (
+            player.confirmed_jersey_number == query_number
+            or (player.confirmed_jersey_number is None and known == {query_number})
+        )
+        distances = []
+        for proto in player.prototypes:
+            if (
+                proto.feature.segment_id != query.segment_id
+                and proto.weight > 0
+                and proto.weight >= self.min_prototype_weight
+            ):
+                dist = self._pair_distance(query, proto.feature, engine)
+                if (
+                    match_number
+                    and _jersey(proto.feature) is None
+                    and math.isfinite(dist)
+                    and dist <= _COMPATIBLE_APPEARANCE_MAX_DISTANCE
+                ):
+                    dist = dist * _MATCHING_NUMBER_DISTANCE_FACTOR
+                distances.append(dist)
         best = min(distances, default=math.inf)
         return best, None if math.isfinite(best) else "no_comparable_prototype"
 
