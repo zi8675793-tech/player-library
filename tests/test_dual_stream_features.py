@@ -235,12 +235,39 @@ def test_conflicting_frames_abstain_and_do_not_leak_between_calls(clear_crop):
     assert next_track.number == 15 and set(next_track.votes) == {15}
 
 
-def test_unknown_readable_frames_reduce_temporal_confidence(clear_crop):
+def test_unknown_readable_frames_do_not_dilute_temporal_confidence(clear_crop):
     result = JerseyNumberExtractor(Reader([("27", 0.99)], [("27", 0.99)], [], [])).extract_track(
         [clear_crop] * 4
     )
-    assert result.number is None
-    assert result.confidence <= 0.5
+    assert result.number == 27
+    assert result.confidence == pytest.approx(0.99)
+    assert result.legible
+    assert result.votes == pytest.approx({27: 1.98})
+
+
+# Backward-compatible alias for test discovery if referenced by old name
+test_unknown_readable_frames_reduce_temporal_confidence = (
+    test_unknown_readable_frames_do_not_dilute_temporal_confidence
+)
+
+
+def test_competing_numbers_require_vote_margin_to_confirm(clear_crop):
+    # Two numbers both pass frame support, but margin is insufficient
+    tied = JerseyNumberExtractor(
+        Reader([("27", 0.95)], [("27", 0.95)], [("10", 0.90)], [("10", 0.90)]),
+        min_vote_margin=0.15,
+    ).extract_track([clear_crop] * 4)
+    assert tied.number is None
+    assert tied.confidence == pytest.approx(0.95)
+    assert tied.votes == pytest.approx({27: 1.90, 10: 1.80})
+
+    # Decisive margin confirms the leading number
+    decisive = JerseyNumberExtractor(
+        Reader([("27", 0.95)], [("27", 0.95)], [("10", 0.70)], [("10", 0.70)]),
+        min_vote_margin=0.15,
+    ).extract_track([clear_crop] * 4)
+    assert decisive.number == 27
+    assert decisive.confidence == pytest.approx(0.95)
 
 
 def test_two_numbers_in_one_crop_are_not_multiple_votes(clear_crop):

@@ -82,9 +82,12 @@ def assess_image_quality(image: np.ndarray) -> float:
 class JerseyNumberExtractor:
     """Recognize only complete 1–2 digit tokens inside a person crop's torso.
 
-    Each crop supplies at most one vote. Track confidence is winning confidence
-    mass divided by *all quality-passing frames*, including OCR misses, rather
-    than a softmax that could turn a single lucky detection into certainty.
+    Each crop supplies at most one vote. Track confidence is the average detection
+    confidence across supporting keyframes of the winning number (divided by its
+    support frame count, avoiding artificial dilution across back-view or unnumbered
+    frames). Temporal confirmation enforces multi-frame support (>= min_support_frames),
+    high average confidence (>= min_track_confidence), and a safety margin over the
+    runner candidate (confidence - runner >= min_vote_margin).
     Callers must supply distinct frames of one track in temporal order; the
     DualStreamExtractor enforces frame and file uniqueness at its input boundary.
     """
@@ -190,13 +193,11 @@ class JerseyNumberExtractor:
         votes: dict[int, float] = {}
         supports: dict[int, int] = {}
         raw: dict[int, tuple[float, str | None]] = {}
-        usable_frames = 0
         legible = False
         for image in images:
             rgb = validate_rgb_image(image)
             if assess_image_quality(rgb) == 0:
                 continue
-            usable_frames += 1
             prediction = self.extract(rgb)
             legible |= prediction.legible
             if prediction.number is None:
@@ -210,8 +211,8 @@ class JerseyNumberExtractor:
             return JerseyNumberPrediction(None, 0.0, legible, {})
         ranked = sorted(votes, key=lambda number: (-votes[number], number))
         best = ranked[0]
-        confidence = votes[best] / usable_frames
-        runner = votes[ranked[1]] / usable_frames if len(ranked) > 1 else 0.0
+        confidence = votes[best] / supports[best]
+        runner = votes[ranked[1]] / supports[ranked[1]] if len(ranked) > 1 else 0.0
         confirmed = (
             supports[best] >= self.min_support_frames
             and confidence >= self.min_track_confidence

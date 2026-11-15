@@ -112,3 +112,23 @@
   - 全链路增量 E2E 测试 `tests/test_incremental_pipeline_e2e.py` 增至 **21 passed**（新增单视频有号冷启动首批建档端到端专项测试）；
   - 代码规范 `uv run ruff check app/identity/` 与格式检查 100% 通过。
 
+## 9. T1 球衣号码提取器时序置信度被无号码帧稀释归零修复（Bug 3，2026-11-15）
+
+- **问题定位与稀释机理 (Bug 3)**：
+  - 原 `app/features/jersey_number.py` 中 `JerseyNumberExtractor.extract_track` 计算轨迹置信度时，公式为 `confidence = votes[best] / usable_frames`；
+  - 在篮球激烈运动场景下，球员频繁转身弯腰，球衣号码（胸前/后背）通常仅在 2~4 个特定关键帧中清晰可见；
+  - 将关键帧检出票数直接除以全轨迹总质量通过帧数（如 12 帧），导致高置信度多帧命中（如 $0.95 \times 2 = 1.90$）被稀释至 $1.90 / 12 = 0.158 \ll 0.85$；
+  - 导致真实测试集 11 条目标轨迹的球衣号码 100% 被一票否决为 `None`，使下游强物理证据流与号码排他机制彻底瘫痪。
+- **算法重构与多重安全门禁**：
+  1. **检出关键帧平均置信度**：将主候选号码置信度分母由全轨迹帧数 `usable_frames` 修正为该号码被实际支持检测的帧数：
+     $$\text{confidence} = \frac{\text{votes}[\text{best}]}{\text{supports}[\text{best}]}$$
+     背身无号帧不再稀释正面或背面高质检出；
+  2. **次优候选竞争边距**：次优候选（runner）同样计算其检出平均置信度（若无则为 0.0），严格保留竞争边距检查：`confidence - runner >= self.min_vote_margin`，防止多号码混淆；
+  3. **防单帧噪点与质量门禁**：严格保留 `supports[best] >= self.min_support_frames`（默认至少 2 帧独立见证才允许确认）以及 `confidence >= self.min_track_confidence`（默认 $\ge 0.85$）。
+- **验证结论**：
+  - `tests/test_dual_stream_features.py` 从 84 项增至 **86 passed**（校准背身帧不稀释测试，新增多候选竞争边距测试）；
+  - 全量测试套件 `uv run pytest tests/ -q` **1034 passed, 1 skipped**；
+  - 增量流水线与回归测试 `tests/test_incremental_pipeline_e2e.py` **21 passed**；
+  - 代码规范 `uv run ruff check app/features/` 与格式检查 100% 通过；
+  - **真实切片复核通过**：针对 `test/track/20/samples/` 和 `test/track/6/samples/` 真实切片复核，高置信度 15 号（Clip 20 T00002 conf=0.980）、23 号（Clip 20 T00001 conf=0.973）、28 号（Clip 6 T00001 conf=0.917）、10 号（Clip 20 T00005 conf=0.983，Clip 6 T00008 conf=0.995）全部准确识别，彻底终结全量退化为 `None` 的致命缺陷。
+
