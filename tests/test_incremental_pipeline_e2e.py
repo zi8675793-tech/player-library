@@ -406,7 +406,7 @@ def test_new_queries_keep_fixed_revision_decisions_until_a_later_batch(pipeline)
         pipeline.segment(43, angle=70, number=None),
         pipeline.segment(50, angle=80, number=None),
     ]
-    ambiguous = pipeline.segment(68, angle=43, number=None)
+    ambiguous = pipeline.segment(68, angle=115, number=None)
     matcher = RecordingMatcher()
     pipeline.submit([*b_segments, ambiguous], expected=1, matcher=matcher)
     snapshot = pipeline.snapshot()

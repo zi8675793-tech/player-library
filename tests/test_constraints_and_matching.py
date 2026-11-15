@@ -590,7 +590,8 @@ def test_different_models_cannot_form_a_new_identity_cluster():
         "missing_prototype_geometry",
     ],
 )
-def test_incomparable_existing_player_is_not_evidence_of_new_identity(gap):
+def test_incomparable_existing_player_does_not_block_new_identity_admission(gap):
+    """Bug 6: Incomparable existing player (no prototype, model mismatch, missing history) does not block eligible candidates from creating a new identity."""
     old, first, second = segment("old"), segment("q1"), segment("q2")
     item = feature(
         old,
@@ -603,8 +604,9 @@ def test_incomparable_existing_player_is_not_evidence_of_new_identity(gap):
     result = plan(
         [feature(first), feature(second)], [player], segments=geometry, assignments=assignments
     )
-    assert_deferred(result, first, second)
-    assert not result.new_players
+    assert len(result.new_players) == 1
+    assert result.decisions[0].outcome == DecisionOutcome.CREATED_NEW
+    assert result.decisions[1].outcome == DecisionOutcome.CREATED_NEW
 
 
 def test_new_identity_cluster_never_contains_a_transitive_cannot_link():
@@ -928,3 +930,67 @@ def test_matching_jersey_number_boosts_discovery_clique():
     assert len(result.new_players) == 1
     assert result.new_players[0].confirmed_jersey_number == 27
     assert {d.outcome for d in result.decisions} == {DecisionOutcome.CREATED_NEW}
+
+
+def test_deadband_elimination_allows_candidates_beyond_threshold_to_form_identity():
+    """Bug 6: Candidates with distance in (0.25, 0.29] are no longer trapped in ambiguity deadband."""
+    old = segment("v_old")
+    # Existing unnamed player with distance 0.0
+    player = profile(prototype(feature(old, distance=0.0)))
+    # Two cross-video witnesses with distance 0.27 from old (> 0.25 matching threshold, but <= 0.29 old deadband)
+    q1 = segment("v_q1")
+    q2 = segment("v_q2")
+    f1 = feature(q1, distance=0.27)
+    f2 = feature(q2, distance=0.27)
+    result = plan([f1, f2], [player], segments=[old, q1, q2])
+    assert len(result.new_players) == 1
+    assert result.decisions[0].outcome == DecisionOutcome.CREATED_NEW
+    assert result.decisions[1].outcome == DecisionOutcome.CREATED_NEW
+
+
+def test_physical_number_privilege_bypasses_unnumbered_profile_capture():
+    """Bug 6: Confirmed jersey number not present in gallery has physical separation privilege against unnumbered profiles."""
+    old = segment("v_old")
+    # Existing unnamed player with no confirmed jersey number
+    player = profile(prototype(feature(old, distance=0.0)))
+    # Query has confirmed jersey number 27, distance 0.27 to the unnamed player (> 0.25, but <= 0.29 old deadband)
+    # In old code: 0.27 <= 0.29 and reason is None -> separated = False -> blocked by unnumbered profile.
+    # In new code: 27 not in occupied_numbers -> physical number privilege -> separated = True -> creates player 27!
+    q = segment("v_q")
+    query = feature(q, number=27, distance=0.27)
+    result = plan([query], [player], segments=[old, q])
+    assert len(result.new_players) == 1
+    assert result.new_players[0].confirmed_jersey_number == 27
+    assert result.decisions[0].outcome == DecisionOutcome.CREATED_NEW
+    assert result.decisions[0].evidence["new_player_id"] == result.new_players[0].player_id
+
+
+def test_real_data_logic_number_27_with_distance_0_23_to_player_15_creates_identity():
+    """Bug 6 (Acceptance 4): With player 15 in gallery, a 27 track at distance ~0.23 enters eligible and creates player 27."""
+    old = segment("v_15")
+    proto_15 = prototype(feature(old, number=15, distance=0.0), player_id="player_15")
+    player_15 = profile(proto_15, number=15, player_id="player_15")
+    q = segment("v_27")
+    query_27 = feature(q, number=27, distance=0.23)
+    result = plan([query_27], [player_15], segments=[old, q])
+    # Must not be deferred (insufficient_evidence)
+    assert result.decisions[0].outcome == DecisionOutcome.CREATED_NEW
+    assert result.decisions[0].target_player_id is None
+    assert len(result.new_players) == 1
+    assert result.new_players[0].confirmed_jersey_number == 27
+    assert result.decisions[0].evidence["reason"] == "confirmed_jersey_number_seed"
+
+
+def test_physical_number_occupied_does_not_bypass_separation():
+    """Bug 6: If candidate jersey number is already occupied, it does not get blanket separation bypass."""
+    old = segment("v_old")
+    player_27 = profile(prototype(feature(old, number=27, distance=0.0)), number=27)
+    q = segment("v_q")
+    # Candidate with number 27, distance 0.28 to player 27 (exceeds 0.25).
+    # Since 27 is occupied, it cannot bypass separation or create a second duplicate 27 profile.
+    # But raw_dist 0.28 <= 0.45 triggers Bug 4 discount (0.14) which matches player 27.
+    # So if raw distance is 0.48 (> 0.45, no discount), it defers and does NOT create a duplicate 27.
+    query_27_divergent = feature(q, number=27, distance=0.48)
+    result = plan([query_27_divergent], [player_27], segments=[old, q])
+    assert result.decisions[0].outcome == DecisionOutcome.INSUFFICIENT
+    assert len(result.new_players) == 0

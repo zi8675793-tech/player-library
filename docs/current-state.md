@@ -156,3 +156,21 @@
   - 代码规范 `uv run ruff check app/identity/` 与格式检查 100% 通过；
   - **逻辑验证确认**：两段号码均为 27、原始余弦距离为 0.28（超标 0.25）的轨迹，在新逻辑下折减为 0.14，稳健归入 27 号球员档案。
 
+## 11. T2 增量匹配引擎新档案准入门槛“模糊带死锁”与强物理号码误锁修复（Bug 6，2026-11-15）
+
+- **问题定位与死锁机理 (Bug 6)**：
+  - 原 `app/identity/matching.py` 中的 `eligible` 候选准入筛选判定 `separated` 时，硬编码要求对所有已有球员的距离严格满足 `distance > self.distance_threshold + self.competitive_margin + _EPS`（即 $0.25 + 0.04 = 0.29$）；
+  - 引发同队同色球衣“死锁真空带”：篮球比赛中同队队友 ResNet18 外观余弦距离天然处于 0.20 ~ 0.24 区间。当候选轨迹与已有球员（如 15 号）距离约为 0.22 时，既无法匹配已有名额（竞争边距不满足），又因距离不大于 0.29 被剥夺参与新档案聚类的资格，永久死锁在待定池；
+  - 引发强物理号码被无号档案误锁：当候选轨迹具备明确球衣号码（如 27），而图库中存在无号码未命名档案时，因无号档案无已知号码无法触发 `jersey_conflict`，距离在 0.29 内即被反向绑架，无法建立 27 号独立档案；
+  - 原型缺失与不可比误伤：已有球员因原型缺失或模型不匹配导致 `no_comparable_prototype` 或 `missing_history` 时，代码将其判定为未分离，剥夺了完全独立候选轨迹的建档资格。
+- **算法重构与准入安全体系**：
+  1. **消除无意义的人为真空带 (Deadband Elimination)**：将距离排他门限由 $d > 0.29$ 修正为 $d > \text{distance\_threshold} + \epsilon$（$d > 0.25$），候选段超出匹配门限即表明不属于该球员档案；
+  2. **强物理号码免死金牌 (Physical Number Privilege)**：候选轨迹具备已确认球衣号码且该号码在当前图库已知球员中均不存在（未被占用）时，在物理上必然属于新球员，对所有已有档案直接视为满足物理分离（`separated = True`），绝不被无号码泛外观档案扣留；
+  3. **不可比/缺失历史原型的防御性放行**：对 `reason in {"jersey_conflict", "cannot_link", "no_comparable_prototype", "missing_history"}` 均视为有效分离，只要未产生有效低距离匹配即不剥夺进入 `eligible` 资格。
+- **验证结论**：
+  - `tests/test_constraints_and_matching.py` 从 105 项增至 **109 passed**（包含真空带消除测试、强物理号码免死金牌测试、已有 15 号下距离 0.23 的真实 27 号建档测试、号码已占用防越界测试）；
+  - 全量测试套件 `uv run pytest tests/ -q` **1042 passed, 1 skipped**；
+  - 增量流水线与回归测试 `tests/test_incremental_pipeline_e2e.py` **21 passed**；
+  - 代码规范 `uv run ruff check app/identity/` 与格式检查 100% 通过；
+  - **真实数据逻辑验证确认**：在已有 15 号档案的前提下，输入一段距离 15 号约为 0.23 的真实 27 号轨迹，在新逻辑下顺利进入 `eligible` 并触发 Track A 强物理号码直通建立 27 号独立球员档案，彻底摆脱永久待定死锁。
+

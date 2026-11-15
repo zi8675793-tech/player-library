@@ -364,6 +364,17 @@ class IncrementalMatcher:
             raise ValueError("Missing segment metadata for a candidate/pending feature")
         decisions: dict[str, IncrementalDecision] = {}
         eligible: set[str] = set()
+        occupied_numbers = {
+            player.confirmed_jersey_number
+            for player in players
+            if player.confirmed_jersey_number is not None
+        }
+        for player in players:
+            for proto in player.prototypes:
+                num = _jersey(proto.feature)
+                if num is not None:
+                    occupied_numbers.add(num)
+
         for sid, query in sorted(queries.items()):
             scores = {
                 player.player_id: self._player_score(query, player, engine) for player in profiles
@@ -398,32 +409,28 @@ class IncrementalMatcher:
                 margin,
                 evidence,
             )
-            # An incomparable player is not evidence of a new identity. Require
-            # explicit physical exclusion or distance beyond the ambiguity band.
-            separated = all(
-                reason in {"jersey_conflict", "cannot_link"}
-                or (
-                    math.isfinite(distance)
-                    and distance > self.distance_threshold + self.competitive_margin + _EPS
+            query_number = _jersey(query)
+            if query_number is not None and query_number not in occupied_numbers:
+                # Strong physical jersey number not present in the gallery is physically
+                # separated from all existing players (cannot be captured by unnumbered profiles).
+                separated = True
+            else:
+                separated = all(
+                    reason
+                    in {
+                        "jersey_conflict",
+                        "cannot_link",
+                        "no_comparable_prototype",
+                        "missing_history",
+                    }
+                    or (math.isfinite(distance) and distance > self.distance_threshold + _EPS)
+                    for distance, reason in scores.values()
                 )
-                for distance, reason in scores.values()
-            )
             can_seed = query.appearance.quality_score > 0 and query.appearance.quality_score >= max(
                 self.min_quality, self.min_prototype_weight
             )
             if not matched and can_seed and separated:
                 eligible.add(sid)
-
-        occupied_numbers = {
-            player.confirmed_jersey_number
-            for player in players
-            if player.confirmed_jersey_number is not None
-        }
-        for player in players:
-            for proto in player.prototypes:
-                num = _jersey(proto.feature)
-                if num is not None:
-                    occupied_numbers.add(num)
 
         self._resolve_batch_conflicts(decisions, queries, engine)
         new_players = self._discover(
