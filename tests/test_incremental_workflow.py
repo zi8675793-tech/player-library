@@ -1703,3 +1703,608 @@ def test_short_segment_incremental_matching_and_gating_regression(tmp_path):
     plan4 = res4.data["plan"]
     assert all(d["category"] == "insufficient_evidence" for d in plan4["decisions"])
     assert len(plan4["new_players"]) == 0
+
+
+def test_stage1_interrupted_recovery_and_idempotency(tmp_path, monkeypatch):
+    """Stage 1: Verify interrupted reassessment cleanly resumes on replay to identical state."""
+    from app.storage.incremental_operations import read_incremental_operations
+    from app.workflows import incremental as inc_module
+
+    settings = make_incremental_settings(tmp_path)
+
+    # 1. Prepare 3 batches:
+    # Batch 1: Player A appears in clip alpha and beta (angle=0.0) -> forms Player 1
+    b1_a = make_clip_batch("alpha", angle=0.0)
+    b1_b = make_clip_batch("beta", angle=0.0)
+    comb1 = EvidenceBatch(
+        match_id="m",
+        batch_id="b-1",
+        producer="synthetic",
+        clips=[*b1_a.clips, *b1_b.clips],
+        identity_evidence=IdentityEvidence(
+            tracks=[*b1_a.identity_evidence.tracks, *b1_b.identity_evidence.tracks],
+            observations=[
+                *b1_a.identity_evidence.observations,
+                *b1_b.identity_evidence.observations,
+            ],
+            segments=[*b1_a.identity_evidence.segments, *b1_b.identity_evidence.segments],
+            samples=[*b1_a.identity_evidence.samples, *b1_b.identity_evidence.samples],
+            feature_spaces=b1_a.identity_evidence.feature_spaces,
+        ),
+    )
+    seg1 = segment_tracks(comb1)
+
+    # Batch 2: Player A absent; single clip gamma with Person Y (angle=2.0) -> deferred as unassigned
+    b2 = make_clip_batch("gamma", angle=2.0)
+    seg2 = segment_tracks(b2)
+
+    # Batch 3: Person Y returns in clip delta (angle=2.0) -> matches Person Y in Step B, creates Player 2
+    b3 = make_clip_batch("delta", angle=2.0)
+    seg3 = segment_tracks(b3)
+
+    # --- Run A: Normal uninterrupted execution ---
+    db_normal = connect(":memory:")
+    r1_norm = update_incremental(
+        db_normal,
+        UpdateRequest(batch=seg1.batch, expected_revision=0),
+        segmentation_report=seg1.report,
+        feature_values={},
+        settings=settings,
+    )
+    r2_norm = update_incremental(
+        db_normal,
+        UpdateRequest(batch=seg2.batch, expected_revision=r1_norm.revision),
+        segmentation_report=seg2.report,
+        feature_values={},
+        settings=settings,
+    )
+    r3_norm = update_incremental(
+        db_normal,
+        UpdateRequest(batch=seg3.batch, expected_revision=r2_norm.revision),
+        segmentation_report=seg3.report,
+        feature_values={},
+        settings=settings,
+    )
+    assert r3_norm.data["changed"] is True
+    state_norm = get_identity_state(db_normal, "m").data
+
+    # --- Run B: Interrupted execution on Batch 3 during reassessment ---
+    db_interrupted = connect(":memory:")
+    r1_int = update_incremental(
+        db_interrupted,
+        UpdateRequest(batch=seg1.batch, expected_revision=0),
+        segmentation_report=seg1.report,
+        feature_values={},
+        settings=settings,
+    )
+    r2_int = update_incremental(
+        db_interrupted,
+        UpdateRequest(batch=seg2.batch, expected_revision=r1_int.revision),
+        segmentation_report=seg2.report,
+        feature_values={},
+        settings=settings,
+    )
+
+    # Simulate interruption inside reassess_unassigned
+    real_reassess = inc_module.reassess_unassigned
+    interrupted_once = False
+
+    def fault_reassess(*args, **kwargs):
+        nonlocal interrupted_once
+        if not interrupted_once:
+            interrupted_once = True
+            raise RuntimeError("simulated network loss / process crash during reassessment pass")
+        return real_reassess(*args, **kwargs)
+
+    monkeypatch.setattr(inc_module, "reassess_unassigned", fault_reassess)
+
+    with pytest.raises(RuntimeError, match="simulated network loss"):
+        update_incremental(
+            db_interrupted,
+            UpdateRequest(batch=seg3.batch, expected_revision=r2_int.revision),
+            segmentation_report=seg3.report,
+            feature_values={},
+            settings=settings,
+        )
+
+    # Verify primary commit succeeded and recorded incremental_primary operation
+    ops = read_incremental_operations(db_interrupted, "m")
+    primary_ops = [op for op in ops if op["phase"] == "incremental_primary"]
+    assert len(primary_ops) == 3  # b-1, b-2, b-3 primary passes all recorded
+    complete_ops = [op for op in ops if op["phase"] == "complete"]
+    assert len(complete_ops) == 2  # b-1 and b-2 completed, b-3 not yet complete!
+
+    # Replay Batch 3 (at current committed revision): must cleanly resume and complete!
+    repo_int = Repository(db_interrupted)
+    current_rev_int = repo_int.revision("m")
+    r3_resumed = update_incremental(
+        db_interrupted,
+        UpdateRequest(batch=seg3.batch, expected_revision=current_rev_int),
+        segmentation_report=seg3.report,
+        feature_values={},
+        settings=settings,
+    )
+
+    state_resumed = get_identity_state(db_interrupted, "m").data
+
+    # Both runs reach 100% IDENTICAL gallery state!
+    assert len(state_resumed.players) == len(state_norm.players) == 2
+    assert len(state_resumed.assignments) == len(state_norm.assignments) == 4
+    assert {a.segment_id: a.status for a in state_resumed.assignments} == {
+        a.segment_id: a.status for a in state_norm.assignments
+    }
+    assert {a.segment_id: a.player_id for a in state_resumed.assignments} == {
+        a.segment_id: a.player_id for a in state_norm.assignments
+    }
+    assert len(state_resumed.templates) == len(state_norm.templates)
+
+    # Idempotent re-submission after completion returns cached response with changed=False
+    r3_idempotent = update_incremental(
+        db_interrupted,
+        UpdateRequest(batch=seg3.batch, expected_revision=r3_resumed.revision),
+        segmentation_report=seg3.report,
+        feature_values={},
+        settings=settings,
+    )
+    assert r3_idempotent.data["changed"] is False
+    assert r3_idempotent.data["summary"]["idempotent_replay"] is True
+    assert r3_idempotent.revision == r3_resumed.revision
+
+
+def _short_clip_recovery_batch():
+    """Two full clips create a player in the primary pass; a short third clip can
+    only match in the association-only reassessment, so reassessment must commit."""
+    from test_stage5_unified_incremental import _combine_clip_batches
+
+    from app.contracts.segmentation import SegmentationPolicy
+
+    full = [make_clip_batch("c0"), make_clip_batch("c1")]
+    short = make_clip_batch("c2")
+    short = short.model_copy(
+        update={
+            "identity_evidence": short.identity_evidence.model_copy(
+                update={"samples": short.identity_evidence.samples[:2]}
+            )
+        }
+    )
+    batch = _combine_clip_batches([*full, short], "synthetic-recovery-probe")
+    return segment_tracks(batch, policy=SegmentationPolicy(version="track-consistency-v3"))
+
+
+def test_stage1_reassessment_committed_then_completion_fails_resumes(tmp_path, monkeypatch):
+    """Scenario c: reassessment commits (revision advances) but the completion record
+    write fails. Ordinary replay must reuse the committed reassessment, not re-run it
+    at the stale primary revision (which raised RevisionConflict)."""
+    from app.storage.incremental_operations import read_incremental_operations
+    from app.workflows import incremental as inc_module
+
+    settings = make_incremental_settings(tmp_path)
+    seg = _short_clip_recovery_batch()
+    request = UpdateRequest(batch=seg.batch, expected_revision=0)
+
+    healthy = connect(":memory:")
+    h = update_incremental(
+        healthy, request, segmentation_report=seg.report, feature_values={}, settings=settings
+    )
+    healthy_assign = {
+        a.segment_id: a.player_id for a in get_identity_state(healthy, "m").data.assignments
+    }
+    assert h.revision == 2  # primary rev 1, reassessment rev 2
+
+    db = connect(":memory:")
+    real_put = inc_module.put_incremental_operation
+    failed_once = False
+
+    def fault_put(connection, match_id, operation_key, phase, *args, **kwargs):
+        nonlocal failed_once
+        if phase == "complete" and not failed_once:
+            failed_once = True
+            raise RuntimeError("crash after reassessment commit, before completion record")
+        return real_put(connection, match_id, operation_key, phase, *args, **kwargs)
+
+    monkeypatch.setattr(inc_module, "put_incremental_operation", fault_put)
+    with pytest.raises(RuntimeError, match="crash after reassessment commit"):
+        update_incremental(
+            db, request, segmentation_report=seg.report, feature_values={}, settings=settings
+        )
+
+    ops = read_incremental_operations(db, "m")
+    assert [o["phase"] for o in ops].count("incremental_reassessment") == 1
+    assert not [o for o in ops if o["phase"] == "complete"]
+    current = Repository(db).revision("m")
+    assert current == 2  # reassessment already advanced the revision
+
+    monkeypatch.undo()
+    resumed = update_incremental(
+        db,
+        UpdateRequest(batch=seg.batch, expected_revision=current),
+        segmentation_report=seg.report,
+        feature_values={},
+        settings=settings,
+    )
+    resumed_assign = {
+        a.segment_id: a.player_id for a in get_identity_state(db, "m").data.assignments
+    }
+    assert resumed_assign == healthy_assign
+    assert Repository(db).revision("m") == 2
+
+    # A further duplicate replay is idempotent and returns the same final revision.
+    again = update_incremental(
+        db,
+        UpdateRequest(batch=seg.batch, expected_revision=resumed.revision),
+        segmentation_report=seg.report,
+        feature_values={},
+        settings=settings,
+    )
+    assert again.data["changed"] is False
+    assert again.revision == 2
+
+
+def test_stage1_resume_completion_after_later_batch_committed(tmp_path, monkeypatch):
+    """A stranded completion record can be written even after a later batch advanced
+    the match revision; the operation row is keyed by evidence, not by current revision."""
+    from app.workflows import incremental as inc_module
+
+    settings = make_incremental_settings(tmp_path)
+    seg = _short_clip_recovery_batch()
+    db = connect(":memory:")
+    real_put = inc_module.put_incremental_operation
+    failed_once = False
+
+    def fault_put(connection, match_id, operation_key, phase, *args, **kwargs):
+        nonlocal failed_once
+        if phase == "complete" and not failed_once:
+            failed_once = True
+            raise RuntimeError("crash before completion record")
+        return real_put(connection, match_id, operation_key, phase, *args, **kwargs)
+
+    monkeypatch.setattr(inc_module, "put_incremental_operation", fault_put)
+    with pytest.raises(RuntimeError, match="crash before completion record"):
+        update_incremental(
+            db,
+            UpdateRequest(batch=seg.batch, expected_revision=0),
+            segmentation_report=seg.report,
+            feature_values={},
+            settings=settings,
+        )
+    monkeypatch.undo()
+    stranded_rev = Repository(db).revision("m")
+
+    # A later, independent batch commits and advances the revision further.
+    later = segment_tracks(make_clip_batch("c9", angle=2.5))
+    update_incremental(
+        db,
+        UpdateRequest(batch=later.batch, expected_revision=stranded_rev),
+        segmentation_report=later.report,
+        feature_values={},
+        settings=settings,
+    )
+    assert Repository(db).revision("m") > stranded_rev
+
+    # Replaying the stranded batch recovers its own definite result without conflict.
+    resumed = update_incremental(
+        db,
+        UpdateRequest(batch=seg.batch, expected_revision=Repository(db).revision("m")),
+        segmentation_report=seg.report,
+        feature_values={},
+        settings=settings,
+    )
+    assert resumed.revision == stranded_rev
+    ops = inc_module.get_incremental_operation(
+        db, "m", inc_module.evidence_fingerprint(seg.batch, {}), "complete"
+    )
+    assert ops is not None and ops["committed_revision"] == stranded_rev
+
+
+def test_stage1_lost_response_and_duplicate_request_are_idempotent(tmp_path):
+    """A committed request whose response was lost, and an outright duplicate request,
+    both return the cached definite result with changed=False and no revision advance."""
+    settings = make_incremental_settings(tmp_path)
+    seg = _short_clip_recovery_batch()
+    db = connect(":memory:")
+    first = update_incremental(
+        db,
+        UpdateRequest(batch=seg.batch, expected_revision=0),
+        segmentation_report=seg.report,
+        feature_values={},
+        settings=settings,
+    )
+    state_first = get_identity_state(db, "m").data
+    # Lost response: caller resubmits at the original expected revision 0.
+    lost = update_incremental(
+        db,
+        UpdateRequest(batch=seg.batch, expected_revision=0),
+        segmentation_report=seg.report,
+        feature_values={},
+        settings=settings,
+    )
+    assert lost.data["changed"] is False
+    assert lost.data["summary"]["idempotent_replay"] is True
+    assert lost.revision == first.revision
+    # Duplicate request at the current revision.
+    dup = update_incremental(
+        db,
+        UpdateRequest(batch=seg.batch, expected_revision=first.revision),
+        segmentation_report=seg.report,
+        feature_values={},
+        settings=settings,
+    )
+    assert dup.data["changed"] is False
+    assert dup.revision == first.revision
+    state_after = get_identity_state(db, "m").data
+    assert {a.segment_id: a.player_id for a in state_after.assignments} == {
+        a.segment_id: a.player_id for a in state_first.assignments
+    }
+
+
+def _v3_segment(batch):
+    from app.contracts.segmentation import SegmentationPolicy
+
+    return segment_tracks(batch, policy=SegmentationPolicy(version="track-consistency-v3"))
+
+
+def _two_clip_player(clip_a, clip_b, angle, name):
+    from test_stage5_unified_incremental import _combine_clip_batches
+
+    comb = _combine_clip_batches(
+        [make_clip_batch(clip_a, angle), make_clip_batch(clip_b, angle)], name
+    )
+    return _v3_segment(comb)
+
+
+def test_stage1_machine_tentative_is_reevaluated_not_frozen(tmp_path):
+    """Req 3: a historical machine-tentative (proposed/automatic) assignment is
+    re-evaluated when new evidence arrives, instead of being frozen forever."""
+    settings = make_incremental_settings(tmp_path)
+    db = connect(":memory:")
+    seg1 = _two_clip_player("alpha", "beta", 0.0, "b1")
+    res1 = update_incremental(
+        db,
+        UpdateRequest(batch=seg1.batch, expected_revision=0),
+        segmentation_report=seg1.report,
+        feature_values={},
+        settings=settings,
+    )
+    state1 = get_identity_state(db, "m").data
+    tentative = {
+        a.segment_id: a.player_id
+        for a in state1.assignments
+        if a.status == "proposed" and a.method == "automatic" and a.player_id
+    }
+    assert tentative, "first cross-clip batch must create tentative assignments"
+
+    # New evidence (gamma, same appearance) arrives; historical tentative is re-assessed.
+    seg2 = _v3_segment(make_clip_batch("gamma", 0.0))
+    res2 = update_incremental(
+        db,
+        UpdateRequest(batch=seg2.batch, expected_revision=res1.revision),
+        segmentation_report=seg2.report,
+        feature_values={},
+        settings=settings,
+    )
+    diag = res2.data["plan"]["matching_diagnostics"]
+    reassessed = {sid for sid in tentative if sid in diag and "reassessment" in diag[sid]}
+    assert reassessed, "historical tentative segments must be re-evaluated, not frozen"
+    for sid in reassessed:
+        assert diag[sid]["reassessment"]["leave_one_out"] is True
+        assert diag[sid]["reassessment"]["outcome"] in {"kept", "reassigned"}
+    # Same appearance: no better player, so every tentative keeps its player (never revoked).
+    state2 = get_identity_state(db, "m").data
+    after = {a.segment_id: a.player_id for a in state2.assignments}
+    for sid, pid in tentative.items():
+        assert after[sid] == pid
+
+
+def test_stage1_manual_confirmed_assignment_never_auto_changed(tmp_path):
+    """Req 2: a human-confirmed assignment outranks automatic re-evaluation and is
+    preserved verbatim (player, status, method and revision unchanged)."""
+    settings = make_incremental_settings(tmp_path)
+    db = connect(":memory:")
+    seg1 = _two_clip_player("alpha", "beta", 0.0, "b1")
+    res1 = update_incremental(
+        db,
+        UpdateRequest(batch=seg1.batch, expected_revision=0),
+        segmentation_report=seg1.report,
+        feature_values={},
+        settings=settings,
+    )
+    state1 = get_identity_state(db, "m").data
+    target = next(a for a in state1.assignments if a.status == "proposed" and a.player_id)
+    apply_review(
+        db,
+        ReviewRequest(
+            match_id="m",
+            expected_revision=res1.revision,
+            actor="supervisor",
+            commands=[
+                SetAssignmentCommand(
+                    segment_id=target.segment_id,
+                    player_id=target.player_id,
+                    reason="manual_confirm",
+                )
+            ],
+        ),
+    )
+    rev_after_review = Repository(db).revision("m")
+    before = next(
+        a for a in get_identity_state(db, "m").data.assignments if a.segment_id == target.segment_id
+    )
+    assert before.status == "confirmed" and before.method == "manual"
+
+    seg2 = _v3_segment(make_clip_batch("gamma", 0.0))
+    update_incremental(
+        db,
+        UpdateRequest(batch=seg2.batch, expected_revision=rev_after_review),
+        segmentation_report=seg2.report,
+        feature_values={},
+        settings=settings,
+    )
+    after = next(
+        a for a in get_identity_state(db, "m").data.assignments if a.segment_id == target.segment_id
+    )
+    assert after.player_id == before.player_id
+    assert after.status == "confirmed"
+    assert after.method == "manual"
+    assert after.revision == before.revision
+
+
+def test_stage1_tentative_never_auto_revoked_when_unmatched(tmp_path):
+    """Req 3: re-evaluation never revokes a tentative assignment to unassigned, even
+    when new evidence forms a separate far player and offers no better match."""
+    settings = make_incremental_settings(tmp_path)
+    db = connect(":memory:")
+    seg1 = _two_clip_player("alpha", "beta", 0.0, "b1")
+    res1 = update_incremental(
+        db,
+        UpdateRequest(batch=seg1.batch, expected_revision=0),
+        segmentation_report=seg1.report,
+        feature_values={},
+        settings=settings,
+    )
+    before = {
+        a.segment_id: a.player_id
+        for a in get_identity_state(db, "m").data.assignments
+        if a.status == "proposed" and a.player_id
+    }
+    assert before
+    # A far person forms a distinct player; the original tentative segments must survive.
+    seg2 = _two_clip_player("gamma", "delta", 2.0, "b2")
+    update_incremental(
+        db,
+        UpdateRequest(batch=seg2.batch, expected_revision=res1.revision),
+        segmentation_report=seg2.report,
+        feature_values={},
+        settings=settings,
+    )
+    state2 = get_identity_state(db, "m").data
+    after = {a.segment_id: a for a in state2.assignments}
+    for sid, pid in before.items():
+        assert after[sid].player_id == pid
+        assert after[sid].status == "proposed"
+
+
+def test_stage1_reevaluation_is_stable_across_batches(tmp_path):
+    """Req 3: repeated re-evaluation converges; the identity partition does not
+    oscillate as more same-appearance evidence arrives."""
+    settings = make_incremental_settings(tmp_path)
+    db = connect(":memory:")
+    seg1 = _two_clip_player("alpha", "beta", 0.0, "b1")
+    res = update_incremental(
+        db,
+        UpdateRequest(batch=seg1.batch, expected_revision=0),
+        segmentation_report=seg1.report,
+        feature_values={},
+        settings=settings,
+    )
+    partitions = [identity_partition(get_identity_state(db, "m").data.assignments)]
+    for i, clip in enumerate(["gamma", "delta", "epsilon"], start=2):
+        seg = _v3_segment(make_clip_batch(clip, 0.0))
+        res = update_incremental(
+            db,
+            UpdateRequest(batch=seg.batch, expected_revision=res.revision),
+            segmentation_report=seg.report,
+            feature_values={},
+            settings=settings,
+        )
+        partitions.append(identity_partition(get_identity_state(db, "m").data.assignments))
+    # All same-appearance clips belong to one stable player; no fragmentation/oscillation.
+    assert all(len(p) == 1 for p in partitions)
+    final = get_identity_state(db, "m").data
+    assigned = [a for a in final.assignments if a.player_id]
+    assert len({a.player_id for a in assigned}) == 1
+
+
+def test_stage1_tentative_reassignment_is_versioned_and_deactivates_stale_templates(tmp_path):
+    """Req 2/3: when leave-one-out matching finds a better existing player, a machine
+    tentative assignment is reassigned with a versioned decision (revision+1, superseded
+    player evidence), the old player's stale templates from that segment are deactivated,
+    and the persistent player ID is reused (no new identity is created).
+
+    The gallery is split into A (beta-only templates) and B (gamma+delta templates) so
+    that re-evaluating the beta segment empties A under leave-one-out while B's independent
+    samples still match it. This isolates the re-evaluation mechanism from discovery gates.
+    """
+    from dataclasses import replace
+
+    from test_stage5_unified_incremental import _combine_clip_batches
+
+    from app.contracts.identity import Player
+    from app.identity.incremental import plan_incremental_identities
+    from app.storage.snapshot import read_identity_snapshot
+
+    settings = make_incremental_settings(tmp_path)
+    db = connect(":memory:")
+    comb = _combine_clip_batches(
+        [make_clip_batch(c, 0.0) for c in ("beta", "gamma", "delta")], "b1"
+    )
+    seg1 = _v3_segment(comb)
+    update_incremental(
+        db,
+        UpdateRequest(batch=seg1.batch, expected_revision=0),
+        segmentation_report=seg1.report,
+        feature_values={},
+        settings=settings,
+    )
+    snap = read_identity_snapshot(db, "m")
+    g = snap.gallery
+    sid_by_sample = {s.sample_id: s.segment_id for s in g.evidence.samples}
+    s_beta = next(s.segment_id for s in g.evidence.segments if s.clip_id == "beta" and s.active)
+
+    a, b = "pl_aaa", "pl_bbb"
+    split_templates = [
+        t.model_copy(update={"player_id": a if sid_by_sample.get(t.sample_id) == s_beta else b})
+        for t in g.templates
+    ]
+    split_assignments = [
+        asn.model_copy(update={"player_id": a if asn.segment_id == s_beta else b})
+        for asn in g.assignments
+    ]
+    crafted = g.model_copy(
+        update={
+            "players": [Player(player_id=a, match_id="m"), Player(player_id=b, match_id="m")],
+            "templates": split_templates,
+            "assignments": split_assignments,
+        }
+    )
+    snap2 = replace(snap, gallery=crafted)
+    stale_a_templates = [
+        t.template_id
+        for t in split_templates
+        if t.player_id == a and sid_by_sample.get(t.sample_id) == s_beta
+    ]
+    assert stale_a_templates, "A must own the beta segment's templates before re-evaluation"
+
+    seg_beta = _v3_segment(make_clip_batch("beta", 0.0))
+    plan = plan_incremental_identities(
+        snap2,
+        seg_beta.batch,
+        segmentation_report=seg_beta.report,
+        feature_values=snap.feature_values,
+        policy=settings.discovery,
+        constraints=snap.constraints,
+    )
+
+    # Persistent ID reuse: the better player B already exists; no new identity is created.
+    assert not plan.new_players
+    decision = next(d for d in plan.decisions if d.segment_id == s_beta)
+    assert decision.category == "matched_existing"
+    assert decision.player_id == b
+    assert decision.matched_existing_player_id == b
+    reassigned = decision.assignment
+    assert reassigned.player_id == b
+    assert reassigned.status == "proposed"
+    assert reassigned.method == "automatic"
+    assert reassigned.revision == g.revision + 1
+    kinds = {e.kind: e for e in reassigned.evidence}
+    assert "automatic_reassessment_reassignment" in kinds
+    assert kinds["automatic_reassessment_superseded_player"].reference_id == a
+
+    # The old player's stale templates contributed by this segment are deactivated.
+    assert set(stale_a_templates).issubset(set(plan.deactivated_template_ids))
+
+    diag = plan.matching_diagnostics[s_beta]["reassessment"]
+    assert diag["outcome"] == "reassigned"
+    assert diag["leave_one_out"] is True
+    assert diag["current_player_id"] == a
+    assert diag["new_player_id"] == b
+    assert plan.summary["reassigned_tentative_count"] >= 1

@@ -7,6 +7,7 @@ import platform
 import re
 import sqlite3
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 
 from app.adapters._reading import fingerprint
@@ -17,6 +18,7 @@ from app.evaluation.funnel import build_coverage_funnel, build_loss_breakdown
 from app.evaluation.units import extract_evaluation_units, project_units_to_segments
 from app.settings import Settings, SettingsError, load_settings
 from app.storage.database import connect
+from app.storage.matching_diagnostics import read_matching_diagnostics
 from app.workflows.read import get_discovery_reports, get_identity_state, get_review_queue
 from app.workflows.update import update_library
 
@@ -80,6 +82,7 @@ def run_baseline(
     incremental_batches: bool = False,
     batch_size: int = 3,
     reverse_batches: bool = False,
+    chunk_order: Sequence[int] | None = None,
     fixed_segmentation: str | Path | None = None,
     preloaded_raw: tuple | None = None,
     preloaded_batch_and_seg: tuple | None = None,
@@ -156,6 +159,8 @@ def run_baseline(
         chunks = [discovered[i : i + batch_size] for i in range(0, len(discovered), batch_size)]
         if reverse_batches:
             chunks = list(reversed(chunks))
+        elif chunk_order is not None:
+            chunks = [chunks[i] for i in chunk_order]
 
         runtime.mkdir(parents=True, exist_ok=True)
         output.mkdir(exist_ok=False)
@@ -226,6 +231,7 @@ def run_baseline(
 
             state = get_identity_state(connection, settings.match.match_id)
             stored_reports = get_discovery_reports(connection, settings.match.match_id)
+            matching_audit = read_matching_diagnostics(connection, settings.match.match_id)
             queue = get_review_queue(connection, settings.match.match_id)
         except Exception as exc:
             _json(output / "failure.json", {"error": type(exc).__name__, "message": str(exc)})
@@ -292,6 +298,7 @@ def run_baseline(
         config["batch_size"] = batch_size
         config["batch_count"] = len(chunks)
         config["reverse_batches"] = reverse_batches
+        config["chunk_order"] = list(chunk_order) if chunk_order is not None else None
         config["batch_chunks"] = chunks
 
         # Consolidate all identity groups across all stored discovery reports
@@ -537,6 +544,7 @@ def run_baseline(
             {
                 "batches": batch_summaries,
                 "review_queue": queue.model_dump(mode="json"),
+                "matching_attempts": matching_audit,
             },
         )
         _json(output / "config.json", config)
@@ -661,9 +669,13 @@ def run_baseline(
             ):
                 raise RuntimeError("duplicate discovery changed identity state or revision")
             stored = get_discovery_reports(connection, batch.match_id)
-            if len(stored.data) != 1:
+            if not stored.data:
                 raise RuntimeError("missing immutable discovery support")
+            # Unified cold-start routing commits a primary discovery report plus an
+            # association-only reassessment report; the primary (lowest revision)
+            # carries every cold-start identity group.
             discovery = stored.data[0]
+        matching_audit = read_matching_diagnostics(connection, settings.match.match_id)
         queue = get_review_queue(connection, batch.match_id)
     except Exception as exc:
         _json(output / "failure.json", {"error": type(exc).__name__, "message": str(exc)})
@@ -812,6 +824,7 @@ def run_baseline(
             "import": first.model_dump(mode="json"),
             "replay": replay.model_dump(mode="json"),
             "review_queue": queue.model_dump(mode="json"),
+            "matching_attempts": matching_audit,
             "warnings": [w.model_dump(mode="json") for w in batch.warnings],
         },
     )

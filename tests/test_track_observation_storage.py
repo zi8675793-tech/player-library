@@ -152,6 +152,8 @@ def test_v5_upgrade_keeps_existing_identity_and_adds_empty_observation_store(tmp
     )
     db.execute("DROP TABLE identity_discovery_reports")
     db.execute("DROP TABLE track_observations")
+    db.execute("DROP TABLE matching_diagnostics")
+    db.execute("DROP TABLE IF EXISTS incremental_operations")
     db.execute("DELETE FROM schema_migrations WHERE version>=6")
     db.close()
     db = connect(path)

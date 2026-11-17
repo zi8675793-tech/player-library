@@ -75,6 +75,7 @@ class IncrementalIdentityPlan(ContractModel):
     player_map: dict[str, str] = {}
     sample_sources: dict[str, dict] = {}
     summary: dict = {}
+    matching_diagnostics: dict[str, dict] = {}
 
 
 def _usable_samples(samples, components, bad_duplicates, feature_ids):
@@ -105,6 +106,20 @@ def _bucket_representatives(usable_samples, segment_start_s, bucket_s, component
     return list(buckets.values())
 
 
+def _is_protected_assignment(a: Assignment) -> bool:
+    """Human decisions and stable confirmations outrank any automatic re-evaluation."""
+    return (
+        a.status == "confirmed"
+        or a.method in {"manual", "seed", "imported"}
+        or a.unassigned_reason in {"other_person", "rejected"}
+    )
+
+
+def _is_machine_tentative(a: Assignment) -> bool:
+    """An automatic proposal (not yet confirmed) stays re-evaluable as new evidence arrives."""
+    return a.player_id is not None and a.status == "proposed" and a.method == "automatic"
+
+
 def plan_incremental_identities(
     snapshot: Any,
     batch: EvidenceBatch,
@@ -121,12 +136,16 @@ def plan_incremental_identities(
        Falling back to other modes or silently running other algorithms is forbidden.
     2. Fixed snapshot isolation: existing players and templates are fixed at Revision R.
        Existing players serve strictly as read-only matching targets, never manifold clustering nodes.
-       Already assigned segments are never re-clustered, renumbered, or automatically reassigned.
+       Protected assignments (human manual/seed/imported, any confirmed, or rejected/other-person)
+       are never re-clustered, renumbered, or automatically changed. Machine-tentative proposals
+       (proposed/automatic) are re-evaluated against new evidence with leave-one-out matching: they
+       may be versioned-reassigned to a different existing player that passes every gate, but are
+       never auto-revoked to unassigned and never re-clustered into a new identity.
     3. Candidate pool qualification:
        - Incoming supported segments (from segmentation_report);
-       - Historical unassigned segments whose persisted proposal status is 'supported'.
-         Historical segments without persisted supported proposals cannot restore qualification
-         and safely remain deferred as insufficient_evidence.
+       - Historical unassigned OR machine-tentative segments whose persisted proposal status is
+         'supported'. Historical segments without persisted supported proposals cannot restore
+         qualification and safely remain deferred (unassigned) or keep their current tentative player.
     4. Two-step resolution:
        - Step A: Attempt match against existing players under hard spatio-temporal and margin constraints.
        - Step B: Shared manifold candidate grouping on remaining unmatched segments.
@@ -305,13 +324,8 @@ def plan_incremental_identities(
     incoming_to_qualify = {}
     for sid, segment in sorted(active_incoming.items()):
         existing_a = assigned_history.get(sid)
-        if existing_a and (
-            existing_a.player_id is not None
-            or existing_a.status == "confirmed"
-            or existing_a.method in {"manual", "seed"}
-            or existing_a.unassigned_reason in {"other_person", "rejected"}
-        ):
-            unqualified_reasons[sid].append("manual_status_protected")
+        if existing_a and _is_protected_assignment(existing_a):
+            unqualified_reasons[sid].append("already_assigned_in_gallery")
             continue
         incoming_to_qualify[sid] = segment
 
@@ -341,14 +355,14 @@ def plan_incremental_identities(
     for seg in gallery.evidence.segments:
         if not seg.active:
             continue
+        if seg.segment_id in active_incoming:
+            continue
         a = assigned_history.get(seg.segment_id)
-        if a is not None and a.status == "unassigned" and a.player_id is None:
-            if a.method in {"manual", "seed"} or a.unassigned_reason in {
-                "other_person",
-                "rejected",
-            }:
-                unqualified_reasons[seg.segment_id].append("manual_status_protected")
-                continue
+        if (
+            a is not None
+            and not _is_protected_assignment(a)
+            and (a.status == "unassigned" or _is_machine_tentative(a))
+        ):
             stored_prop = stored_proposals.get(seg.segment_id)
             if stored_prop is None or (
                 stored_prop.status != "supported"
@@ -392,6 +406,22 @@ def plan_incremental_identities(
     all_usable_samples = {**incoming_usable_samples, **historical_usable_samples}
     all_representatives = {**incoming_representatives, **historical_representatives}
     all_proposals = {**stored_proposals, **incoming_proposals}
+
+    # Machine-tentative segments (proposed/automatic) are re-evaluated, not frozen.
+    # Leave-one-out: a segment must not match its own contributed templates, so its
+    # samples are excluded from every player while it is being re-assessed.
+    reeval_tentative_sids = {
+        sid
+        for sid in all_qualified_segments
+        if assigned_history.get(sid) is not None and _is_machine_tentative(assigned_history[sid])
+    }
+    loo_templates_by_sid = {
+        sid: {
+            pid: [(t, ts) for (t, ts) in tlist if ts.segment_id != sid]
+            for pid, tlist in deduped_player_templates.items()
+        }
+        for sid in reeval_tentative_sids
+    }
 
     # Pool track-level representations strictly for qualified segments
     seg_reps_by_id = pool_segment_features(
@@ -445,9 +475,8 @@ def plan_incremental_identities(
     matched_diagnostics: dict[str, dict[str, Any]] = {}
     candidate_matches_by_sid: dict[str, tuple[str, float]] = {}
 
+    matching_diagnostics = {}
     for sid, segment in sorted(all_qualified_segments.items()):
-        if not deduped_player_templates:
-            break
         reps = all_representatives[sid]
         usable = all_usable_samples[sid]
         prop = all_proposals.get(sid)
@@ -461,12 +490,13 @@ def plan_incremental_identities(
             else match_threshold
         )
 
+        diagnostic = {}
         best_pid, best_dist, match_reasons = evaluate_existing_player_match(
             segment=segment,
             usable_samples=usable,
             representatives=reps,
             existing_players=existing_players,
-            player_templates=deduped_player_templates,
+            player_templates=loo_templates_by_sid.get(sid, deduped_player_templates),
             distances=distances,
             components=components,
             policy=policy,
@@ -475,7 +505,10 @@ def plan_incremental_identities(
             can_match=can_match,
             match_threshold=seg_match_threshold,
             require_all_samples=getattr(prop, "requires_external_anchor", False),
+            require_independent_anchor=getattr(prop, "independent_anchor_required", False),
+            diagnostics=diagnostic,
         )
+        matching_diagnostics[sid] = {"existing_match": diagnostic}
 
         if best_pid is not None and best_dist is not None:
             candidate_matches_by_sid[sid] = (best_pid, best_dist)
@@ -491,6 +524,93 @@ def plan_incremental_identities(
             ["best_match_exceeds_threshold"],
         ):
             unqualified_reasons[sid].extend(match_reasons)
+
+    # Archive matches of individual exposures need independent local corroboration.
+    # This never propagates identity to intervening samples or observations: each
+    # accepted image has already passed every archive, far and rival gate itself.
+    if policy.require_local_archive_corroboration:
+        atomic = {
+            sid: match
+            for sid, match in candidate_matches_by_sid.items()
+            if getattr(all_proposals.get(sid), "independent_anchor_required", False)
+        }
+        rejected_atomic = set()
+        for sid, (pid, _) in atomic.items():
+            prop = all_proposals[sid]
+            query = all_usable_samples[sid][0]
+            witnesses = []
+            for other_sid, (other_pid, _) in atomic.items():
+                other_prop = all_proposals[other_sid]
+                other = all_usable_samples[other_sid][0]
+                if (
+                    sid == other_sid
+                    or pid != other_pid
+                    or prop.parent_segment_id != other_prop.parent_segment_id
+                    or components[query.sample_id] == components[other.sample_id]
+                ):
+                    continue
+                start, end = sorted((query.time_s, other.time_s))
+                if not (
+                    policy.bucket_s
+                    <= end - start
+                    <= segmentation_report.policy.max_continuous_sample_gap_s
+                ):
+                    continue
+                # No path may bridge a hole, an unusable image, an incomparable
+                # observation or a single far intruder, even with clean endpoints.
+                if any(
+                    p.parent_segment_id == prop.parent_segment_id
+                    and p.segment.start_s < end
+                    and p.segment.end_s > start
+                    and p.reasons == ["unobserved_or_unreliable_interval"]
+                    for p in all_proposals.values()
+                ):
+                    continue
+                between = [
+                    s
+                    for s in all_samples_list
+                    if (s.clip_id, s.track_id) == (query.clip_id, query.track_id)
+                    and start <= s.time_s <= end
+                ]
+                if any(
+                    s.sample_id not in distances.features
+                    or (
+                        s.tracking_quality is not None
+                        and (
+                            s.tracking_quality.occluded
+                            or s.tracking_quality.mixed_identity
+                            or s.tracking_quality.usability == "unusable"
+                            or s.tracking_quality.clean_review == "rejected"
+                        )
+                    )
+                    for s in between
+                ):
+                    continue
+                if any(
+                    (d := distances.pair(a, b).distance) is None or d >= policy.far_distance
+                    for a, b in combinations(between, 2)
+                ):
+                    continue
+                witnesses.append(
+                    {
+                        "segment_id": other_sid,
+                        "sample_id": other.sample_id,
+                        "elapsed_s": end - start,
+                        "distance": distances.pair(query, other).distance,
+                    }
+                )
+            matching_diagnostics[sid]["local_archive_corroboration"] = {
+                "status": "pass" if witnesses else "fail",
+                "witnesses": witnesses,
+                "propagation_boundary": "observed_sample_exposure_only",
+                "continuity_is_identity_evidence": False,
+            }
+            if not witnesses:
+                rejected_atomic.add(sid)
+                unqualified_reasons[sid].append("insufficient_local_archive_corroboration")
+        for sid in rejected_atomic:
+            del candidate_matches_by_sid[sid]
+            del matched_diagnostics[sid]
 
     # Resolve mutual exclusion among segments matching the same existing player
     matched_players_grouped = defaultdict(list)
@@ -520,9 +640,46 @@ def plan_incremental_identities(
                             "spatio_temporal_conflict_with_closer_match"
                         )
         for sid, dist in sids_dists:
+            matching_diagnostics[sid]["batch_spatiotemporal"] = {
+                "status": "fail" if sid in conflicted_out else "pass",
+                "reasons": list(unqualified_reasons[sid]),
+            }
             if sid not in conflicted_out:
                 matched_existing[sid] = pid
                 matched_diagnostics[sid].update(player_id=pid, distance=dist)
+
+    if policy.require_local_archive_corroboration:
+        # A witness removed by the batch physical conflict resolver cannot certify
+        # another exposure. Prune to a fixed point, without selecting a winner.
+        changed = True
+        while changed:
+            changed = False
+            for sid in list(matched_existing):
+                gate = matching_diagnostics[sid].get("local_archive_corroboration")
+                if gate is None:
+                    continue
+                surviving = [
+                    w
+                    for w in gate["witnesses"]
+                    if matched_existing.get(w["segment_id"]) == matched_existing[sid]
+                ]
+                if not surviving:
+                    gate.update(status="fail", surviving_witnesses=[])
+                    unqualified_reasons[sid].append("local_archive_witness_removed_by_conflict")
+                    del matched_existing[sid]
+                    del matched_diagnostics[sid]
+                    changed = True
+                else:
+                    gate["surviving_witnesses"] = surviving
+
+    for sid, reasons in unqualified_reasons.items():
+        if sid not in matching_diagnostics:
+            matching_diagnostics[sid] = {
+                "existing_match": {
+                    "status": "not_evaluated",
+                    "prequalification_reasons": list(reasons),
+                }
+            }
 
     # Step B: Open-set constrained manifold clustering on remaining unmatched segments
     for sid in all_qualified_segments:
@@ -539,6 +696,7 @@ def plan_incremental_identities(
         for sid in sorted(all_qualified_segments)
         if not association_only
         and sid not in matched_existing
+        and sid not in reeval_tentative_sids
         and not unqualified_reasons[sid]
         and getattr(
             all_proposals.get(sid),
@@ -597,14 +755,10 @@ def plan_incremental_identities(
                     match_threshold=match_threshold,
                     diagnostics=diagnostics,
                 )
-                if (
-                    matched_pid is not None
-                    or diagnostics.get("has_existing_support", False)
-                    or diagnostics.get("has_unresolved_existing", False)
-                    or any(
-                        score <= match_threshold
-                        for score in diagnostics.get("player_scores", {}).values()
-                    )
+                matching_diagnostics.setdefault(m_id, {})["new_group_existing_check"] = diagnostics
+                if matched_pid is not None or any(
+                    score <= match_threshold
+                    for score in diagnostics.get("player_scores", {}).values()
                 ):
                     unresolved_existing = True
             if unresolved_existing:
@@ -654,7 +808,7 @@ def plan_incremental_identities(
         seg_fp,
         gallery.revision,
         association_only,
-        "safe-matching-v2",
+        "safe-matching-v3-diagnostics",
     )
 
     decisions: list[IncrementalSegmentDecision] = []
@@ -696,15 +850,84 @@ def plan_incremental_identities(
                     )
                 )
 
+    # Versioned re-evaluation of machine-tentative assignments. A tentative segment
+    # is kept unless leave-one-out matching finds a different existing player that
+    # passes every gate; it is never auto-revoked and never re-clustered as new.
+    deactivated_template_ids: list[str] = []
+    reassigned_tentative = 0
+    kept_tentative = 0
+
+    def _tentative_reeval_decision(sid, segment):
+        """Return a reassignment decision, or None when the current player is kept.
+
+        A kept tentative assignment is a no-op: it emits no decision and never
+        revokes to unassigned, even when the segment failed to re-qualify.
+        """
+        nonlocal reassigned_tentative, kept_tentative
+        current_pid = assigned_history[sid].player_id
+        new_pid = matched_existing.get(sid, current_pid)
+        diag = matched_diagnostics.get(sid)
+        if new_pid == current_pid:
+            kept_tentative += 1
+            matching_diagnostics.setdefault(sid, {})["reassessment"] = {
+                "current_player_id": current_pid,
+                "leave_one_out": sid in loo_templates_by_sid,
+                "outcome": "kept",
+            }
+            return None
+        reassigned_tentative += 1
+        dist = diag["distance"] if diag else None
+        stale = [
+            t.template_id
+            for t in gallery.templates
+            if t.active
+            and t.player_id == current_pid
+            and combined_samples.get(t.sample_id) is not None
+            and combined_samples[t.sample_id].segment_id == sid
+        ]
+        deactivated_template_ids.extend(stale)
+        matching_diagnostics.setdefault(sid, {})["reassessment"] = {
+            "current_player_id": current_pid,
+            "leave_one_out": True,
+            "outcome": "reassigned",
+            "new_player_id": new_pid,
+            "deactivated_template_ids": stale,
+        }
+        assignment = Assignment(
+            match_id=batch.match_id,
+            segment_id=sid,
+            player_id=new_pid,
+            status="proposed",
+            method="automatic",
+            evidence=[
+                AssignmentEvidence(
+                    kind="automatic_reassessment_reassignment",
+                    reference_id=report_id,
+                    feature_space_id=fsid,
+                    distance=dist,
+                ),
+                AssignmentEvidence(
+                    kind="automatic_reassessment_superseded_player",
+                    reference_id=current_pid,
+                ),
+            ],
+            revision=gallery.revision + 1,
+        )
+        return IncrementalSegmentDecision(
+            segment_id=sid,
+            clip_id=segment.clip_id,
+            track_id=segment.track_id,
+            category="matched_existing",
+            player_id=new_pid,
+            assignment=assignment,
+            distance=dist,
+            matched_existing_player_id=new_pid,
+        )
+
     # Decisions for incoming batch segments
     for sid, segment in sorted(active_incoming.items()):
         existing_a = assigned_history.get(sid)
-        if existing_a and (
-            existing_a.player_id is not None
-            or existing_a.status == "confirmed"
-            or existing_a.method in {"manual", "seed"}
-            or existing_a.unassigned_reason in {"other_person", "rejected"}
-        ):
+        if existing_a and _is_protected_assignment(existing_a):
             decisions.append(
                 IncrementalSegmentDecision(
                     segment_id=sid,
@@ -717,6 +940,11 @@ def plan_incremental_identities(
                     assignment=existing_a,
                 )
             )
+            continue
+        if existing_a and _is_machine_tentative(existing_a):
+            reeval = _tentative_reeval_decision(sid, segment)
+            if reeval is not None:
+                decisions.append(reeval)
             continue
         elif sid in matched_existing:
             assigned_pid = matched_existing[sid]
@@ -810,15 +1038,21 @@ def plan_incremental_identities(
                 )
             )
 
-    # Decisions for any historical unassigned segments that were resolved into groups
+    # Decisions for historical segments resolved into groups or re-evaluated tentative
     resolved_historical_sids = {
         sid
         for sid in qualified_historical
-        if sid in matched_existing or sid in new_identity_assignment_map
+        if sid in matched_existing
+        or sid in new_identity_assignment_map
+        or sid in reeval_tentative_sids
     }
     for sid in sorted(resolved_historical_sids - set(active_incoming)):
         hist_seg = qualified_historical[sid]
-        if sid in matched_existing:
+        if sid in reeval_tentative_sids:
+            reeval = _tentative_reeval_decision(sid, hist_seg)
+            if reeval is not None:
+                decisions.append(reeval)
+        elif sid in matched_existing:
             assigned_pid = matched_existing[sid]
             diag = matched_diagnostics.get(sid)
             dist = diag["distance"] if diag else None
@@ -878,8 +1112,17 @@ def plan_incremental_identities(
                 )
             )
 
-    # Unknown segments for discovery report
-    assigned_sids = {d.segment_id for d in decisions if d.player_id is not None}
+    # Unknown segments for discovery report. Machine-tentative incoming segments keep
+    # their current player even when re-evaluation emits no decision, so they are
+    # assigned, not unknown.
+    tentative_incoming = {
+        sid
+        for sid in active_incoming
+        if assigned_history.get(sid) is not None and _is_machine_tentative(assigned_history[sid])
+    }
+    assigned_sids = {
+        d.segment_id for d in decisions if d.player_id is not None
+    } | tentative_incoming
     unknown_report_segments = [
         UnknownSegment(
             segment_id=sid,
@@ -903,7 +1146,7 @@ def plan_incremental_identities(
         summary={
             "snapshot_revision": gallery.revision,
             "association_only": association_only,
-            "matching_algorithm": "safe-matching-v2",
+            "matching_algorithm": "safe-matching-v3-diagnostics",
             "groups": len(discovered_groups),
             "new_players": len(new_players),
             "matched_existing": sum(d.category == "matched_existing" for d in decisions),
@@ -960,6 +1203,10 @@ def plan_incremental_identities(
         "new_players_count": len(new_players),
         "new_templates_count": len(new_templates),
         "active_players_count": len(existing_players) + len(new_players),
+        "reassessed_tentative_count": len(reeval_tentative_sids),
+        "reassigned_tentative_count": reassigned_tentative,
+        "kept_tentative_count": kept_tentative,
+        "deactivated_templates_count": len(deactivated_template_ids),
         "deferred_reasons": dict(deferred_counts),
     }
 
@@ -969,9 +1216,10 @@ def plan_incremental_identities(
         decisions=decisions,
         new_players=new_players,
         new_templates=new_templates,
-        deactivated_template_ids=[],
+        deactivated_template_ids=deactivated_template_ids,
         discovery_report=report,
         player_map=player_map,
         sample_sources=sample_sources,
         summary=summary,
+        matching_diagnostics=matching_diagnostics,
     )

@@ -259,7 +259,8 @@ def _qualify_active_segments(
             if (allow_short_match and can_match)
             else policy.min_support_buckets
         )
-        if len(representatives) < min_b:
+        independent_anchor = external_anchor and proposal.independent_anchor_required
+        if len(representatives) < (1 if independent_anchor else min_b):
             reasons[sid].append("insufficient_nonduplicate_buckets")
             continue
 
@@ -1066,24 +1067,70 @@ def evaluate_existing_player_match(
     can_match: bool = True,
     match_threshold: float | None = None,
     require_all_samples: bool = False,
+    require_independent_anchor: bool = False,
     diagnostics: dict[str, Any] | None = None,
 ) -> tuple[str | None, float | None, list[str]]:
     """Rank comparable identities before acceptance; retain every sample's counter-evidence."""
-    if not can_match:
-        return None, None, ["segment_cannot_match_existing"]
     thresh = match_threshold
     if thresh is None:
         thresh = policy.existing_player_match_threshold
     if thresh is None:
         thresh = policy.clustering_threshold
 
+    gates = {
+        name: {"status": "not_evaluated"}
+        for name in (
+            "eligibility",
+            "distance",
+            "margin",
+            "far",
+            "competing_sample",
+            "external_anchor",
+            "coverage",
+        )
+    }
+    candidates = {}
+    trace = {
+        "schema_version": "existing-match-diagnostics-v1",
+        "segment_id": segment.segment_id,
+        "thresholds": {
+            "match": thresh,
+            "far": policy.far_distance,
+            "margin": policy.existing_player_rival_margin,
+            "counter_evidence_margin": policy.counter_evidence_margin,
+            "coverage": policy.min_coverage,
+            "min_match_buckets": policy.min_match_buckets,
+        },
+        "require_all_samples": require_all_samples,
+        "require_independent_anchor": require_independent_anchor,
+        "candidates": candidates,
+        "gates": gates,
+    }
+
+    def finish(pid, distance, reasons):
+        trace.update(result_player_id=pid, best_distance=distance, reasons=reasons)
+        if diagnostics is not None:
+            diagnostics.update(trace)
+        return pid, distance, reasons
+
+    if not can_match:
+        gates["eligibility"] = {"status": "fail", "reason": "segment_cannot_match_existing"}
+        return finish(None, None, ["segment_cannot_match_existing"])
+
     forbidden = set(forbidden_players or ())
     sample_scores: dict[str, dict[str, float]] = {}
     player_scores: dict[str, float] = {}
     counter_evidence: set[str] = set()
     mature_players: set[str] = set()
+    archive_witnesses = {}
     queries = {s.sample_id: s for s in [*usable_samples, *representatives]}
     query_components = {components[sid] for sid in queries}
+    trace.update(
+        query_sample_ids=sorted(queries),
+        representative_sample_ids=[r.sample_id for r in representatives],
+    )
+    for pid in sorted(set(existing_players) - set(player_templates)):
+        candidates[pid] = {"eligible": False, "exclusion_reasons": ["no_usable_templates"]}
     for pid, tlist in sorted(player_templates.items()):
         if pid not in existing_players:
             continue
@@ -1100,14 +1147,35 @@ def evaluate_existing_player_match(
         if len({getattr(s, "clip_id", None) for s in templates.values()} - {None}) >= 2:
             mature_players.add(pid)
         scores = {}
+        far_samples = {}
+        comparable_counts = {}
+        witnesses = {}
         for sid, query in queries.items():
+            witnesses[sid] = (
+                [
+                    {
+                        "sample_id": template.sample_id,
+                        "clip_id": template.clip_id,
+                        "source_component": components[template.sample_id],
+                        "distance": distances.pair(query, template).distance,
+                    }
+                    for template in templates.values()
+                    if template.clip_id != query.clip_id
+                    and (d := distances.pair(query, template).distance) is not None
+                    and d <= thresh
+                ]
+                if require_independent_anchor
+                else []
+            )
             ds = sorted(
                 d
                 for template in templates.values()
                 if (d := distances.pair(query, template).distance) is not None
             )
+            comparable_counts[sid] = len(ds)
             if ds and ds[0] >= policy.far_distance:
                 counter_evidence.add(pid)
+                far_samples[sid] = ds[0]
             matching_ds = [d for d in ds if d <= thresh]
             if len(matching_ds) >= 2:
                 scores[sid] = sum(matching_ds[:2]) / 2
@@ -1118,17 +1186,37 @@ def evaluate_existing_player_match(
             elif ds:
                 scores[sid] = ds[0]
         sample_scores[pid] = scores
+        archive_witnesses[pid] = witnesses
         rep_scores = [scores[s.sample_id] for s in representatives if s.sample_id in scores]
-        if len(rep_scores) >= policy.min_match_buckets and pid not in forbidden:
+        exclusions = []
+        if pid in forbidden:
+            exclusions.append("forbidden_by_spatiotemporal_or_manual_constraint")
+        if len(rep_scores) < (1 if require_independent_anchor else policy.min_match_buckets):
+            exclusions.append("insufficient_comparable_representatives")
+        candidates[pid] = {
+            "eligible": not exclusions,
+            "exclusion_reasons": exclusions,
+            "template_count": len(templates),
+            "representative_count": len(representatives),
+            "comparable_representatives": len(rep_scores),
+            "score": float(median(rep_scores)) if rep_scores else None,
+            "sample_scores": scores,
+            "far_counter_evidence": pid in counter_evidence,
+            "far_sample_nearest_distances": far_samples,
+            "comparable_template_counts": comparable_counts,
+            "independent_archive_witnesses": witnesses,
+        }
+        if not exclusions:
             player_scores[pid] = float(median(rep_scores))
 
+    trace.update(eligible_player_ids=sorted(player_scores))
     if diagnostics is not None:
         diagnostics.update(
             player_scores=player_scores,
             sample_scores=sample_scores,
             counter_evidence_player_ids=sorted(counter_evidence),
             has_existing_support=any(
-                s <= thresh for scores in sample_scores.values() for s in scores.values()
+                s <= thresh for pid in player_scores for s in sample_scores[pid].values()
             ),
             has_unresolved_existing=any(
                 pid not in forbidden and len(scores) < len(queries)
@@ -1136,33 +1224,74 @@ def evaluate_existing_player_match(
             ),
         )
     if not player_scores:
-        return None, None, ["no_matching_existing_player"]
+        gates["eligibility"] = {"status": "fail", "reason": "no_matching_existing_player"}
+        return finish(None, None, ["no_matching_existing_player"])
+    gates["eligibility"] = {"status": "pass"}
     ranked = sorted(player_scores.items(), key=lambda item: (item[1], item[0]))
     best_pid, best_dist = ranked[0]
+    trace.update(best_candidate_player_id=best_pid, ranked_player_scores=dict(ranked))
+    gates["distance"] = {"status": "pass" if best_dist <= thresh else "fail", "value": best_dist}
     if best_dist > thresh:
-        return None, best_dist, ["best_match_exceeds_threshold"]
+        return finish(None, best_dist, ["best_match_exceeds_threshold"])
     margin = getattr(policy, "existing_player_rival_margin", 0.04)
     if margin is None:
         margin = policy.rival_margin
-    if len(ranked) > 1 and ranked[1][1] - best_dist < margin:
-        return None, best_dist, ["unresolved_competing_player_margin"]
+    gap = ranked[1][1] - best_dist if len(ranked) > 1 else None
+    trace.update(runner_up_player_id=ranked[1][0] if len(ranked) > 1 else None)
+    gates["margin"] = {
+        "status": "pass" if gap is None or gap >= margin else "fail",
+        "value": gap,
+        "threshold": margin,
+        "single_candidate": gap is None,
+    }
+    if gap is not None and gap < margin:
+        return finish(None, best_dist, ["unresolved_competing_player_margin"])
+    gates["far"] = {"status": "fail" if best_pid in counter_evidence else "pass"}
     if best_pid in counter_evidence:
-        return None, best_dist, ["minority_sample_far_from_existing_player"]
+        return finish(None, best_dist, ["minority_sample_far_from_existing_player"])
 
     scores = sample_scores[best_pid]
-    for sid, own_score in scores.items():
-        if any(
-            pid != best_pid
-            and sid in rival
-            and rival[sid] <= thresh
-            and own_score - rival[sid] >= policy.counter_evidence_margin
-            for pid, rival in sample_scores.items()
-        ):
-            return None, best_dist, ["minority_sample_supports_competing_player"]
+    competing = [
+        {
+            "sample_id": sid,
+            "player_id": pid,
+            "own_score": own_score,
+            "rival_score": sample_scores[pid][sid],
+        }
+        for sid, own_score in scores.items()
+        for pid in player_scores
+        if pid != best_pid
+        and sid in sample_scores[pid]
+        and sample_scores[pid][sid] <= thresh
+        and own_score - sample_scores[pid][sid] >= policy.counter_evidence_margin
+    ]
+    # Excluded identities remain auditable but cannot compete for ownership.
+    gates["competing_sample"] = {"status": "fail" if competing else "pass", "witnesses": competing}
+    if competing:
+        return finish(None, best_dist, ["minority_sample_supports_competing_player"])
+    if require_independent_anchor:
+        witnesses = archive_witnesses[best_pid]
+        missing = [
+            sid
+            for sid in queries
+            if len({w["clip_id"] for w in witnesses[sid]}) < 2
+            or len({w["source_component"] for w in witnesses[sid]}) < 2
+        ]
+        gates["external_anchor"] = {
+            "status": "fail" if missing else "pass",
+            "unsupported_sample_ids": missing,
+            "witnesses": witnesses,
+            "propagation_boundary": "observed_sample_exposure_only",
+        }
+        if missing:
+            return finish(None, best_dist, ["insufficient_independent_archive_witnesses"])
     if require_all_samples and (
         len(scores) != len(queries) or any(s > thresh for s in scores.values())
     ):
-        return None, best_dist, ["external_anchor_requires_all_sample_support"]
+        gates["external_anchor"] = {"status": "fail"}
+        return finish(None, best_dist, ["external_anchor_requires_all_sample_support"])
+    if not require_independent_anchor:
+        gates["external_anchor"] = {"status": "pass" if require_all_samples else "not_applicable"}
 
     rep_scores = [scores[s.sample_id] for s in representatives if s.sample_id in scores]
     supported = sum(s <= thresh for s in rep_scores)
@@ -1176,9 +1305,16 @@ def evaluate_existing_player_match(
         and all(s < policy.far_distance for s in scores.values())
         and sum(rep_scores) / 4 <= thresh
     )
+    gates["coverage"] = {
+        "status": "pass" if coverage >= policy.min_coverage or small_sample_tolerance else "fail",
+        "value": coverage,
+        "supported_representatives": supported,
+        "representative_count": len(representatives),
+        "small_sample_tolerance": small_sample_tolerance,
+    }
     if coverage < policy.min_coverage and not small_sample_tolerance:
-        return None, best_dist, ["insufficient_existing_player_coverage"]
-    return (
+        return finish(None, best_dist, ["insufficient_existing_player_coverage"])
+    return finish(
         best_pid,
         best_dist,
         [

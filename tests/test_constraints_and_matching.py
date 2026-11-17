@@ -355,8 +355,30 @@ def test_appearance_threshold_is_inclusive(distance, expected):
 def test_competitive_margin_is_inclusive_and_ties_defer(runner_distance, expected):
     old1, old2, query = segment("a"), segment("b"), segment("q")
     players = [
-        profile(prototype(feature(old1))),
-        profile(prototype(feature(old2, distance=runner_distance), "runner"), player_id="runner"),
+        profile(prototype(feature(old1, distance=0.20))),
+        profile(
+            prototype(feature(old2, distance=0.20 + runner_distance), "runner"), player_id="runner"
+        ),
+    ]
+    result = plan([feature(query)], players, segments=[old1, old2, query])
+    assert result.decisions[0].outcome == expected
+
+
+@pytest.mark.parametrize(
+    ("runner_margin", "expected"),
+    [
+        (0.010, DecisionOutcome.MATCHED_EXISTING),
+        (0.009, DecisionOutcome.INSUFFICIENT),
+        (0.0, DecisionOutcome.INSUFFICIENT),
+    ],
+)
+def test_adaptive_high_confidence_margin_gating(runner_margin, expected):
+    old1, old2, query = segment("a"), segment("b"), segment("q")
+    players = [
+        profile(prototype(feature(old1, distance=0.15))),
+        profile(
+            prototype(feature(old2, distance=0.15 + runner_margin), "runner"), player_id="runner"
+        ),
     ]
     result = plan([feature(query)], players, segments=[old1, old2, query])
     assert result.decisions[0].outcome == expected
@@ -994,3 +1016,53 @@ def test_physical_number_occupied_does_not_bypass_separation():
     result = plan([query_27_divergent], [player_27], segments=[old, q])
     assert result.decisions[0].outcome == DecisionOutcome.INSUFFICIENT
     assert len(result.new_players) == 0
+
+
+def test_subdigit_containment_matches_existing_player_under_strong_affinity():
+    """OSNet / 15: Candidate with single-digit '5' matches player '15' when appearance distance <= 0.12."""
+    old = segment("v_15")
+    player_15 = profile(
+        prototype(feature(old, number=15, distance=0.0), player_id="player_15"),
+        number=15,
+        player_id="player_15",
+    )
+    q = segment("v_5")
+    query_5 = feature(q, number=5, distance=0.06)
+    result = plan([query_5], [player_15], segments=[old, q])
+    assert result.decisions[0].outcome == DecisionOutcome.MATCHED_EXISTING
+    assert result.decisions[0].target_player_id == player_15.player_id
+
+
+def test_subdigit_containment_vetoed_when_appearance_is_not_strongly_affine():
+    """OSNet / 15: Single-digit '5' is NOT allowed to match '15' when appearance distance > 0.12."""
+    old = segment("v_15")
+    player_15 = profile(
+        prototype(feature(old, number=15, distance=0.0), player_id="player_15"),
+        number=15,
+        player_id="player_15",
+    )
+    q = segment("v_5")
+    query_5_distant = feature(q, number=5, distance=0.18)
+    result = plan([query_5_distant], [player_15], segments=[old, q])
+    assert result.decisions[0].target_player_id != player_15.player_id
+    assert (
+        result.decisions[0].evidence["player_scores"][player_15.player_id]["blocked_by"]
+        == "jersey_conflict"
+    )
+
+
+def test_non_contained_different_numbers_always_vetoed_even_at_low_distance():
+    """Different distinct numbers (e.g. 10 and 27) are strictly vetoed even if appearance distance is tiny."""
+    old = segment("v_27")
+    player_27 = profile(
+        prototype(feature(old, number=27, distance=0.0), player_id="player_27"),
+        number=27,
+        player_id="player_27",
+    )
+    q = segment("v_10")
+    query_10 = feature(q, number=10, distance=0.04)
+    result = plan([query_10], [player_27], segments=[old, q])
+    assert (
+        result.decisions[0].evidence["player_scores"][player_27.player_id]["blocked_by"]
+        == "jersey_conflict"
+    )

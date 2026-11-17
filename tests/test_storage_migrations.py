@@ -77,6 +77,8 @@ def legacy_database(path):
     db.execute("DROP TABLE identity_discovery_reports")
     for table in ("risk_reviews", "template_reviews", "constraints", "sample_clean_reviews"):
         db.execute(f"ALTER TABLE {table} DROP COLUMN current")
+    db.execute("DROP TABLE matching_diagnostics")
+    db.execute("DROP TABLE IF EXISTS incremental_operations")
     db.execute("DELETE FROM schema_migrations WHERE version>=4")
     db.close()
 
@@ -176,6 +178,8 @@ def test_legacy_clean_review_binding_only_migrates_unambiguous_source(tmp_path, 
     db.execute("DROP TABLE identity_discovery_reports")
     for table in ("risk_reviews", "template_reviews", "constraints", "sample_clean_reviews"):
         db.execute(f"ALTER TABLE {table} DROP COLUMN current")
+    db.execute("DROP TABLE matching_diagnostics")
+    db.execute("DROP TABLE IF EXISTS incremental_operations")
     db.execute("DELETE FROM schema_migrations WHERE version>=4")
     db.close()
     db = connect(path)

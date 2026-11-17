@@ -141,6 +141,7 @@ def _finish_reassessment(connection, batch, segmentation_report, feature_values,
     )
 
     absorbed_assignments = []
+    matching_diagnostics = {}
     secondary_rev = primary.revision + 1
 
     for sid in unassigned_sids:
@@ -157,6 +158,7 @@ def _finish_reassessment(connection, batch, segmentation_report, feature_values,
             or getattr(prop, "status", None) != "supported"
         )
 
+        diagnostic = {}
         best_pid, best_dist, match_reasons = evaluate_existing_player_match(
             segment=segment,
             usable_samples=samples,
@@ -169,7 +171,9 @@ def _finish_reassessment(connection, batch, segmentation_report, feature_values,
             spatio_temporal_engine=engine,
             can_match=True,
             require_all_samples=require_all,
+            diagnostics=diagnostic,
         )
+        matching_diagnostics[sid] = {"existing_match": diagnostic}
 
         if best_pid is not None:
             assignment = Assignment(
@@ -193,10 +197,19 @@ def _finish_reassessment(connection, batch, segmentation_report, feature_values,
             absorbed_assignments.append(assignment)
             engine.player_assignments[sid] = best_pid
 
-    if not absorbed_assignments:
-        return primary
+    from app.storage.matching_diagnostics import put_matching_diagnostics
 
     with transaction(connection):
+        put_matching_diagnostics(
+            connection,
+            batch.match_id,
+            primary.data["report"]["report_id"] + ":absorption",
+            primary.revision,
+            "cold_absorption",
+            matching_diagnostics,
+        )
+        if not absorbed_assignments:
+            return primary
         for a in absorbed_assignments:
             repo.put_assignment(
                 a,
@@ -402,20 +415,84 @@ def _discover_core(
 def discover_library(
     connection, batch, *, segmentation_report, feature_values, settings, expected_revision
 ):
+    from app.contracts.api import UpdateRequest
     from app.evaluation.guard import assert_inference_isolation, assert_no_ground_truth_in_evidence
+    from app.identity.fingerprints import evidence_fingerprint
+    from app.workflows.incremental import update_incremental
 
     assert_inference_isolation("discover_library")
     if hasattr(batch, "sources"):
         assert_no_ground_truth_in_evidence(batch.sources)
 
-    primary = _discover_core(
+    if settings.input.adapter != "machine":
+        raise ValueError("automatic discovery requires machine input")
+
+    repo = Repository(connection)
+    revision = repo.revision(batch.match_id)
+
+    if (
+        getattr(getattr(settings, "discovery", None), "support_mode", None)
+        != "constrained_manifold"
+    ):
+        primary = _discover_core(
+            connection,
+            batch,
+            segmentation_report=segmentation_report,
+            feature_values=feature_values,
+            settings=settings,
+            expected_revision=expected_revision,
+        )
+        return _finish_reassessment(
+            connection, batch, segmentation_report, feature_values, settings, primary
+        )
+
+    # Check for replay first for unified incremental discovery
+    existing = read_discovery_reports(connection, batch.match_id)
+    input_fp = evidence_fingerprint(batch, feature_values or {})
+    for old in existing:
+        old_report = old.get("report") or old
+        if (
+            old_report.get("input_fingerprint") == input_fp
+            or old.get("input_fingerprint") == input_fp
+        ):
+            return SuccessResponse(
+                data={**old, "changed": False, "committed_revision": revision},
+                revision=revision,
+            )
+
+    if revision != expected_revision:
+        raise RevisionConflict("stale automatic discovery request")
+
+    state = read_identity_snapshot(connection, batch.match_id)
+    if (
+        existing
+        or state.gallery.players
+        or state.gallery.templates
+        or state.constraints
+        or state.template_reviews
+        or state.gallery.risk_reviews
+        or repo.clean_reviews(batch.match_id)
+        or repo.review_records(batch.match_id)
+        or any(a.method in {"manual", "seed"} for a in state.gallery.assignments)
+    ):
+        raise StorageConflict("cold-start discovery requires an unreviewed empty identity library")
+
+    resp = update_incremental(
         connection,
-        batch,
+        UpdateRequest(batch=batch, expected_revision=expected_revision),
         segmentation_report=segmentation_report,
         feature_values=feature_values,
         settings=settings,
-        expected_revision=expected_revision,
     )
-    return _finish_reassessment(
-        connection, batch, segmentation_report, feature_values, settings, primary
+    data = dict(resp.data)
+    if "report" not in data and "plan" in data:
+        data["report"] = data["plan"].get("discovery_report")
+    if "player_ids_by_group" not in data and "plan" in data:
+        data["player_ids_by_group"] = data["plan"].get("player_map", {})
+    if "sample_sources" not in data and "plan" in data:
+        data["sample_sources"] = data["plan"].get("sample_sources", {})
+
+    return SuccessResponse(
+        data=data,
+        revision=resp.revision,
     )

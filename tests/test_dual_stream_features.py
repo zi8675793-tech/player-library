@@ -469,3 +469,16 @@ def test_corrupt_png_fails_before_model_work(tmp_path):
     with pytest.raises(ValueError):
         pipeline.extract_observations([observation("3/samples/bad.png")])
     assert reader.calls == []
+
+
+def test_osnet_sportsmot_baseline_feature_extraction(clear_crop):
+    """OSNet x1.0 SportsMOT is default baseline producing 512-dim L2-normalized float32."""
+    visual = AppearanceExtractor()
+    assert visual.model_name == "sports-osnet-x1.0-sportsmot"
+    result = visual.extract(clear_crop)
+    assert result.vector.shape == (512,)
+    assert result.vector.dtype == np.float32
+    assert np.isfinite(result.vector).all()
+    assert np.linalg.norm(result.vector) == pytest.approx(1.0, abs=1e-5)
+    assert result.model_name == "sports-osnet-x1.0-sportsmot"
+    assert 0 < result.quality_score <= 1

@@ -212,7 +212,8 @@ class JerseyNumberExtractor:
         ranked = sorted(votes, key=lambda number: (-votes[number], number))
         best = ranked[0]
         confidence = votes[best] / supports[best]
-        runner = votes[ranked[1]] / supports[ranked[1]] if len(ranked) > 1 else 0.0
+        competing = [num for num in ranked[1:] if supports[num] >= self.min_support_frames]
+        runner = votes[competing[0]] / supports[competing[0]] if competing else 0.0
         confirmed = (
             supports[best] >= self.min_support_frames
             and confidence >= self.min_track_confidence

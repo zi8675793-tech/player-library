@@ -81,6 +81,8 @@ class SegmentationPolicy(ContractModel):
     enable_transition_zones: StrictBool = False
     transition_uncertainty_threshold: Probability = 0.45
     scope_risks_to_breaks: StrictBool = False
+    localize_unresolved_evidence: StrictBool = False
+    localize_duplicate_risks: StrictBool = False
     ensure_relative_buckets: StrictBool = False
     # Engineering gates fixed before real-input execution; not identity calibration.
     near_distance: Probability = 0.18
@@ -169,6 +171,18 @@ class SegmentProposal(ContractModel):
     can_match_existing: StrictBool = False
     can_create_new_identity: StrictBool = False
     requires_external_anchor: StrictBool = False
+    independent_anchor_required: StrictBool = False
+    evidence_semantics: Literal[
+        "unspecified",
+        "supported",
+        "unknown_viewpoint",
+        "low_quality_incomparable",
+        "appearance_contradiction",
+        "observation_missing",
+        "duplicate_detection",
+        "insufficient_temporal_support",
+        "unobserved_extent",
+    ] = "unspecified"
     # Always false: supported means a conservative consistency gate, not identity truth.
     identity_verified: Literal[False] = False
 
@@ -187,6 +201,16 @@ class SegmentProposal(ContractModel):
 
     @model_validator(mode="after")
     def anchor_eligibility(self):
+        if self.independent_anchor_required and not self.requires_external_anchor:
+            raise ValueError("independent archive witnesses require an external anchor")
+        if self.independent_anchor_required:
+            if len(self.support_sample_ids) != 1:
+                raise ValueError("independent archive recovery requires one atomic sample")
+            if (
+                self.segment.frame_start is not None
+                and self.segment.frame_end_exclusive != self.segment.frame_start + 1
+            ):
+                raise ValueError("independent archive recovery cannot propagate beyond one frame")
         if self.requires_external_anchor and (
             self.status != "unknown" or not self.can_match_existing or self.can_create_new_identity
         ):

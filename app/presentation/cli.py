@@ -61,6 +61,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="reverse batch order to evaluate order sensitivity",
     )
     baseline.add_argument(
+        "--chunk-order",
+        type=str,
+        default=None,
+        help="comma-separated chunk indices e.g. 2,0,3,1",
+    )
+    baseline.add_argument(
         "--fixed-segmentation",
         type=str,
         default=None,
@@ -131,6 +137,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         from app.presentation.baseline import load_baseline_settings, run_baseline
 
         try:
+            chunk_order = (
+                [int(x.strip()) for x in args.chunk_order.split(",") if x.strip()]
+                if args.chunk_order
+                else None
+            )
             output = run_baseline(
                 load_baseline_settings(args.config),
                 run_id=args.run_id,
@@ -140,6 +151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 incremental_batches=args.incremental_batches,
                 batch_size=args.batch_size,
                 reverse_batches=args.reverse_batches,
+                chunk_order=chunk_order,
                 fixed_segmentation=args.fixed_segmentation,
                 segmentation_version=args.segmentation_version,
                 runtime_root=args.runtime_root,

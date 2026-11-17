@@ -1,28 +1,25 @@
 """512-dimensional appearance features and quality-weighted track medoids.
 
-``AppearanceExtractor().extract(rgb)`` uses pretrained ResNet-18 pooled features
-as a general appearance baseline, not a sports-trained ReID model. Install the
-optional backend with ``uv pip install torch torchvision``. Official weights
-must already be in the Torch cache unless ``allow_download=True`` is explicit.
-For sports ReID, pass a callable ``encoder(rgb_uint8) -> array[512]`` and an
-accurate ``model_name``. ``extract_track(images)`` chooses an observed medoid.
+``AppearanceExtractor().extract(rgb)`` uses pretrained OSNet x1.0 (SportsMOT)
+features as the appearance model for sports player tracking and ReID.
+Pretrained weights are stored locally at ``models/osnet_x1_0_sportsmot.pth``.
+For custom ReID backends, pass a callable ``encoder(rgb_uint8) -> array[512]``
+and an accurate ``model_name``. ``extract_track(images)`` chooses an observed medoid.
 
 The frozen ``AppearanceEmbedding`` fields reproduce docs/data-contracts.md.
-They live here because the current app/contracts package has no T1 model and
-this task's write scope is limited to the four feature implementation/test files.
 """
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 
 import numpy as np
 from PIL import Image
 
 from app.features.jersey_number import assess_image_quality, validate_rgb_image
 
-_BASELINE_MODEL = "torchvision-resnet18-imagenet1k-v1"
+_BASELINE_MODEL = "sports-osnet-x1.0-sportsmot"
+_LEGACY_BASELINE_MODEL = "torchvision-resnet18-imagenet1k-v1"
 
 
 @dataclass(frozen=True)
@@ -50,9 +47,9 @@ def _normalize_vector(value: np.ndarray) -> np.ndarray:
 
 
 class AppearanceExtractor:
-    """Lazy pretrained baseline or an explicitly named 512-dimensional encoder.
+    """Lazy pretrained sports OSNet x1.0 baseline or an explicitly named 512-dimensional encoder.
 
-    ``weights_path`` accepts a trusted ResNet-18 state dict, loaded with
+    ``weights_path`` accepts a trusted state dict, loaded with
     ``weights_only=True``; provide a custom ``model_name`` for those weights.
     No backend is imported, initialized, or downloaded at construction time.
     Unusable images raise ``ValueError`` rather than fabricating a feature.
@@ -75,7 +72,11 @@ class AppearanceExtractor:
             raise ValueError("model_name must be a nonempty, accurate model identifier")
         if (encoder is not None or weights_path is not None) and model_name is None:
             raise ValueError("A custom encoder or weights_path requires model_name")
-        if encoder is None and weights_path is None and model_name not in (None, _BASELINE_MODEL):
+        if (
+            encoder is None
+            and weights_path is None
+            and model_name not in (None, _BASELINE_MODEL, _LEGACY_BASELINE_MODEL)
+        ):
             raise ValueError(f"The default baseline's model_name is {_BASELINE_MODEL!r}")
         self.model_name = model_name or _BASELINE_MODEL
         self._encoder = encoder
@@ -88,42 +89,87 @@ class AppearanceExtractor:
             return self._encoder
         try:
             import torch
-            from torchvision.models import ResNet18_Weights, resnet18
+            import torchvision.transforms as t_transforms
+
+            from app.features.models.osnet import build_osnet
         except (ImportError, RuntimeError) as exc:
             raise RuntimeError(
                 "The default appearance backend needs compatible torch and torchvision; "
                 "install them with `uv pip install torch torchvision` or inject an encoder"
             ) from exc
 
-        weights = ResNet18_Weights.IMAGENET1K_V1
-        if self._weights_path is not None:
-            if not self._weights_path.is_file():
-                raise FileNotFoundError(f"Appearance weights not found: {self._weights_path}")
-            state_dict = torch.load(self._weights_path, map_location="cpu", weights_only=True)
-        else:
-            cached = (
-                Path(torch.hub.get_dir()) / "checkpoints" / Path(urlparse(weights.url).path).name
+        weights_path = self._weights_path
+        if weights_path is None:
+            project_weights = (
+                Path(__file__).resolve().parents[2] / "models" / "osnet_x1_0_sportsmot.pth"
             )
-            if cached.is_file():
-                state_dict = torch.load(cached, map_location="cpu", weights_only=True)
-            elif self._allow_download:
-                state_dict = weights.get_state_dict(progress=False, check_hash=True)
+            cwd_weights = Path("models/osnet_x1_0_sportsmot.pth").resolve()
+            if project_weights.is_file():
+                weights_path = project_weights
+            elif cwd_weights.is_file():
+                weights_path = cwd_weights
             else:
-                raise RuntimeError(
-                    "Pretrained ResNet-18 weights are not cached. Populate the Torch cache, "
-                    "provide weights_path and model_name, or explicitly set allow_download=True"
-                )
+                raise FileNotFoundError(f"OSNet weights not found at {project_weights}")
+        elif not weights_path.is_file():
+            raise FileNotFoundError(f"Appearance weights not found: {weights_path}")
 
-        model = resnet18(weights=None)
-        model.load_state_dict(state_dict, strict=True)
-        model.fc = torch.nn.Identity()
-        model.eval().to(self._device)
-        preprocess = weights.transforms()
+        state_dict = torch.load(weights_path, map_location="cpu", weights_only=True)
+        if any("conv2a" in k for k in state_dict):
+            model = build_osnet("x1_0", num_classes=0)
+            model.load_state_dict(state_dict, strict=True)
+            model.eval().to(self._device)
+            is_osnet = True
+            backbone = None
+        else:
+            from torchvision.models import resnet18
+
+            model = resnet18(weights=None)
+            model.load_state_dict(state_dict, strict=True)
+            backbone = torch.nn.Sequential(
+                model.conv1,
+                model.bn1,
+                model.relu,
+                model.maxpool,
+                model.layer1,
+                model.layer2,
+                model.layer3,
+                model.layer4,
+            )
+            backbone.eval().to(self._device)
+            is_osnet = False
+
+        preprocess = t_transforms.Compose(
+            [
+                t_transforms.Resize((256, 128)),
+                t_transforms.ToTensor(),
+                t_transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ]
+        )
+
+        w_horiz = (
+            torch.tensor([1.0, 1.5, 1.5, 1.0], device=self._device).view(1, 1, 4)
+            if not is_osnet
+            else None
+        )
 
         def encode(image: np.ndarray) -> np.ndarray:
             tensor = preprocess(Image.fromarray(image)).unsqueeze(0).to(self._device)
             with torch.inference_mode():
-                return model(tensor)[0].detach().cpu().numpy()
+                if is_osnet:
+                    feat = model(tensor)[0]
+                    normed = torch.nn.functional.normalize(feat, dim=0)
+                    return normed.detach().cpu().numpy()
+                else:
+                    fmap = backbone(tensor)[0]
+                    fmap_w = fmap * w_horiz
+                    p_glob = torch.nn.functional.normalize(fmap_w.mean(dim=(1, 2)), dim=0)
+                    p_top = torch.nn.functional.normalize(fmap_w[:, 0:3, :].mean(dim=(1, 2)), dim=0)
+                    p_mid = torch.nn.functional.normalize(fmap_w[:, 3:5, :].mean(dim=(1, 2)), dim=0)
+                    p_bot = torch.nn.functional.normalize(fmap_w[:, 5:8, :].mean(dim=(1, 2)), dim=0)
+
+                    fused = 0.10 * p_glob + 0.50 * p_top + 0.10 * p_mid + 0.30 * p_bot
+                    fused = torch.nn.functional.normalize(fused, dim=0)
+                    return fused.detach().cpu().numpy()
 
         self._encoder = encode
         return encode
@@ -143,17 +189,28 @@ class AppearanceExtractor:
     def extract_track(self, images: Iterable[np.ndarray]) -> AppearanceEmbedding:
         """Select a quality-weighted cosine medoid, preserving a real frame vector."""
         embeddings = []
+        effective_weights = []
         for image in images:
             image = validate_rgb_image(image)
             quality = assess_image_quality(image)
             if quality > 0:
+                h, w = image.shape[:2]
+                aspect = h / max(w, 1)
+                aspect_weight = float(np.exp(-((aspect - 2.0) ** 2) / (2 * (1.0**2))))
+                area = h * w
+                scale_weight = float((area / 25000.0) ** 1.5)
+                eff_weight = (quality**1.5) * aspect_weight * scale_weight
                 embeddings.append(self._extract_usable(image, quality))
+                effective_weights.append(max(eff_weight, 1e-4))
         if not embeddings:
             raise ValueError("No usable appearance images in track")
 
         vectors = np.stack([item.vector for item in embeddings]).astype(np.float64)
-        qualities = np.asarray([item.quality_score for item in embeddings], dtype=np.float64)
+        weights = np.asarray(effective_weights, dtype=np.float64)
         # Sum of weighted cosine similarities; avoids allocating an N-by-N matrix.
-        similarities = vectors @ (qualities @ vectors)
-        best = max(range(len(embeddings)), key=lambda i: (similarities[i], qualities[i], -i))
+        similarities = vectors @ (weights @ vectors)
+        best = max(
+            range(len(embeddings)),
+            key=lambda i: (similarities[i], embeddings[i].quality_score, -i),
+        )
         return embeddings[best]

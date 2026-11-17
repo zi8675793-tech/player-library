@@ -387,6 +387,9 @@ def _load_clip(reader, match, clip_id, evidence, assets, warnings, spaces, value
             risks.append(
                 IdentityRisk(
                     risk_id=stable_id("risk", segment.segment_id, tag),
+                    basis="machine_duplicate_candidate"
+                    if kind == "duplicate_box"
+                    else "unspecified",
                     kind=kind,
                     match_id=match,
                     segment_id=segment.segment_id,

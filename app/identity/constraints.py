@@ -235,6 +235,15 @@ class SpatioTemporalConstraintEngine:
         """Build the T2 physical-frame graph, including for an empty batch."""
         return cls(segments=segments, **kwargs)
 
+    def with_player_assignments(
+        self, player_assignments: Mapping[str, str] | None
+    ) -> "SpatioTemporalConstraintEngine":
+        """Return a fast shallow copy with updated player assignments."""
+        cloned = object.__new__(self.__class__)
+        cloned.__dict__.update(self.__dict__)
+        cloned.player_assignments = dict(player_assignments or {})
+        return cloned
+
     def _init_dual_stream(
         self,
         segments: Sequence[TrackletSegment],

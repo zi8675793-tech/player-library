@@ -64,7 +64,11 @@ def _jump(a, b, policy):
 def _end_of(sample, clip, end):
     # One observed frame exposure in CFR; otherwise no invented VFR duration.
     if clip is not None and clip.frame_timing == "cfr" and clip.fps is not None:
-        return min(end, sample.time_s + 1 / clip.fps)
+        frame_idx = getattr(sample, "frame_idx", None)
+        return min(
+            end,
+            (frame_idx + 1) / clip.fps if frame_idx is not None else sample.time_s + 1 / clip.fps,
+        )
     return min(end, math.nextafter(sample.time_s, math.inf))
 
 
@@ -334,6 +338,128 @@ def _anchor_pairs_compatible(samples, distances, policy):
     return True
 
 
+def _localize_duplicate_risks(evidence, by_track, duplicates, clips, policy):
+    """Refine typed machine advisories, retaining gaps and every raw declaration in audit.
+
+    Human/unspecified risks are never cleared. Duplicate exposures contribute no
+    independent appearance evidence. No cross-track identity is inferred here.
+    """
+    replacements, audit = {}, defaultdict(list)
+    observations_by_id = {o.observation_id: o for o in evidence.observations}
+    all_risks = {r.risk_id: r for r in evidence.risks}
+    for sample in evidence.samples:
+        if sample.tracking_quality:
+            all_risks.update({r.risk_id: r for r in sample.tracking_quality.risks})
+    for risk in all_risks.values():
+        if risk.kind != "duplicate_box" or risk.basis != "machine_duplicate_candidate":
+            continue
+        parent = next((s for s in evidence.segments if s.segment_id == risk.segment_id), None)
+        if parent is None or risk.sample_id is not None:
+            continue
+        observations = [
+            o
+            for o in by_track[parent.clip_id, parent.track_id]
+            if parent.start_s <= o.time_s < parent.end_s
+        ]
+        clip = clips.get(parent.clip_id)
+        if not observations or clip is None or clip.frame_timing != "cfr":
+            continue
+        intervals = []
+        for duplicate in duplicates:
+            for oid in duplicate["observation_ids"]:
+                o = observations_by_id[oid]
+                if (o.clip_id, o.track_id) == (parent.clip_id, parent.track_id):
+                    intervals.append((o.time_s, _end_of(o, clip, parent.end_s)))
+        cursor = parent.start_s
+        for o in observations:
+            if o.time_s - cursor > 1e-9:
+                intervals.append((cursor, o.time_s))
+            cursor = _end_of(o, clip, parent.end_s)
+        if parent.end_s - cursor > 1e-9:
+            intervals.append((cursor, parent.end_s))
+        localized = []
+        for start, end in sorted(set(intervals)):
+            if end <= start:
+                continue
+            localized.append(
+                risk.model_copy(
+                    update={
+                        "risk_id": _id("riskloc", risk.risk_id, start, end),
+                        "start_s": start,
+                        "end_s": end,
+                        "source": _source(
+                            parent,
+                            _hash(policy.model_dump(mode="json")),
+                            {
+                                "localized_from_risk": risk.model_dump(mode="json"),
+                                "start_s": start,
+                                "end_s": end,
+                            },
+                            observations,
+                            version=policy.version,
+                        ),
+                    },
+                    deep=True,
+                )
+            )
+        replacements[risk.risk_id] = localized
+        audit[parent.segment_id].append(
+            ConsistencyFinding(
+                kind="machine_duplicate_risk_localized",
+                start_s=parent.start_s,
+                end_s=parent.end_s,
+                details={
+                    "original_risk": risk.model_dump(mode="json"),
+                    "localized_risks": [r.model_dump(mode="json") for r in localized],
+                    "basis": "observed_high_iou_exposures_and_unobserved_intervals",
+                    "identity_verified": False,
+                    "human_review_cleared": False,
+                },
+            )
+        )
+
+    def replace(risks):
+        return [item for risk in risks for item in replacements.get(risk.risk_id, [risk])]
+
+    samples = []
+    for sample in evidence.samples:
+        q = sample.tracking_quality
+        samples.append(
+            sample.model_copy(
+                update={
+                    "tracking_quality": q.model_copy(update={"risks": replace(q.risks)}, deep=True)
+                },
+                deep=True,
+            )
+            if q
+            else sample
+        )
+    return evidence.model_copy(
+        update={"risks": replace(evidence.risks), "samples": samples}, deep=True
+    ), audit
+
+
+def _semantics(status, reason, start, end, findings):
+    if status == "supported":
+        return "supported"
+    local = [f.kind for f in findings if f.start_s < end and f.end_s > start]
+    if "duplicate_box_candidate" in local:
+        return "duplicate_detection"
+    if reason == "unobserved_or_unreliable_interval":
+        if any(k in local for k in ("observation_interruption", "missing_actual_observation")):
+            return "observation_missing"
+        return "low_quality_incomparable"
+    if reason == "missing_structured_observations":
+        return "observation_missing"
+    if "conflict" in reason:
+        return "appearance_contradiction"
+    if reason == "insufficient_independent_buckets":
+        return "insufficient_temporal_support"
+    if reason.startswith("unsupported_"):
+        return "unobserved_extent"
+    return "unknown_viewpoint"
+
+
 def segment_tracks(
     batch: EvidenceBatch,
     feature_values: FeatureValues | None = None,
@@ -381,6 +507,14 @@ def segment_tracks(
                         "cannot_link": False,
                     }
                 )
+    localized_audit = {}
+    if policy.localize_duplicate_risks:
+        evidence, localized_audit = _localize_duplicate_risks(
+            evidence, by_track, duplicates, clips, policy
+        )
+        samples_by_track = defaultdict(list)
+        for sample in evidence.samples:
+            samples_by_track[sample.clip_id, sample.track_id].append(sample)
     # Simultaneous jumps in many tracks are possible camera motion, not person switches.
     transition_tracks, transition_jumps = defaultdict(set), defaultdict(set)
     for key, observations in by_track.items():
@@ -408,6 +542,7 @@ def segment_tracks(
         )
         clip = clips.get(parent.clip_id)
         report = TrackConsistencyReport(parent_segment=parent.model_copy(deep=True))
+        report.findings.extend(localized_audit.get(parent.segment_id, []))
         distances = _Distances(samples, spaces, feature_values, policy)
         scope_fingerprint = _hash(
             {
@@ -541,6 +676,21 @@ def segment_tracks(
             )
         # Excluded observations and long feature gaps get explicit unknown intervals.
         holes = []
+        if policy.localize_duplicate_risks:
+            ids = {oid for d in duplicates for oid in d["observation_ids"]}
+            for o in observations:
+                if o.observation_id in ids:
+                    end = _end_of(o, clip, parent.end_s)
+                    holes.append((o.time_s, end))
+                    report.findings.append(
+                        ConsistencyFinding(
+                            kind="duplicate_box_candidate",
+                            start_s=o.time_s,
+                            end_s=end,
+                            observation_ids=[o.observation_id],
+                            details={"independent_support": False, "cannot_link": False},
+                        )
+                    )
         for a, b, _ in breaks:
             left_support = [s for s in candidates if s.time_s <= a]
             right_support = [s for s in candidates if s.time_s >= b]
@@ -565,6 +715,7 @@ def segment_tracks(
                     policy.version == "track-consistency-v3"
                     and observation_continuous
                     and not overlapping_breaks
+                    and b.time_s - a.time_s <= policy.max_continuous_sample_gap_s
                 ):
                     is_gap_a_hole = False
                 if is_gap_a_hole:
@@ -643,6 +794,23 @@ def segment_tracks(
                     if policy.local_support_windows and observations and reason in trigger_reasons
                     else []
                 )
+                if reason == "appearance_conflict_including_minority":
+                    for left, right in zip(windows, windows[1:]):
+                        if all(distances.relation(a, b) == "far" for a in left for b in right):
+                            report.findings.append(
+                                ConsistencyFinding(
+                                    kind="sustained_appearance_contradiction",
+                                    start_s=left[0].time_s,
+                                    end_s=_end_of(right[-1], clip, end),
+                                    sample_ids=[s.sample_id for s in left + right],
+                                    details={
+                                        "left_sample_ids": [s.sample_id for s in left],
+                                        "right_sample_ids": [s.sample_id for s in right],
+                                        "appearance_separation": "all_cross_pairs_far",
+                                        "identity_switch_proven": False,
+                                    },
+                                )
+                            )
                 cursor = start
                 for window in windows:
                     first, last = window[0].time_s, _end_of(window[-1], clip, end)
@@ -822,10 +990,61 @@ def segment_tracks(
             else:
                 coalesced.append(proposal)
         anchor_ranges = set()
+        independent_anchor_ranges = set()
         carved = []
         for start, end, status, reason, support in coalesced:
             window = [s for s in candidates if start <= s.time_s < end]
             piece_samples = [s for s in samples if start <= s.time_s < end]
+            if (
+                policy.version == "track-consistency-v3"
+                and policy.localize_unresolved_evidence
+                and status == "unknown"
+                and reason
+                in {
+                    "appearance_or_visibility_unresolved",
+                    "viewpoint_transition_uncertainty",
+                    "appearance_conflict_including_minority",
+                    "insufficient_independent_buckets",
+                }
+            ):
+                # Atomic exposure only: an archive must witness THIS image.
+                # Gaps never inherit identity from chronological track continuity.
+                cursor = start
+                for sample in window:
+                    if not _anchor_samples_usable([sample], excluded_ids):
+                        continue
+                    first, last = sample.time_s, _end_of(sample, clip, end)
+                    if not any(o.time_s == first for o in observations):
+                        continue
+                    if cursor < first:
+                        carved.append(
+                            (cursor, first, "unknown", "unsupported_inter_sample_extent", [])
+                        )
+                    carved.append((first, last, "unknown", reason, [sample]))
+                    anchor_ranges.add((first, last))
+                    independent_anchor_ranges.add((first, last))
+                    report.findings.append(
+                        ConsistencyFinding(
+                            kind="independent_archive_anchor_candidate",
+                            start_s=first,
+                            end_s=last,
+                            sample_ids=[sample.sample_id],
+                            observation_ids=[
+                                o.observation_id for o in observations if first <= o.time_s < last
+                            ],
+                            details={
+                                "parent_interval_reason": reason,
+                                "min_external_clips": 2,
+                                "propagation_boundary": "observed_sample_exposure_only",
+                                "identity_verified": False,
+                                "switch_inferred": False,
+                            },
+                        )
+                    )
+                    cursor = last
+                if cursor < end:
+                    carved.append((cursor, end, "unknown", "unsupported_inter_sample_extent", []))
+                continue
             if (
                 policy.version == "track-consistency-v3"
                 and status == "unknown"
@@ -840,7 +1059,7 @@ def segment_tracks(
                 )
                 >= policy.min_match_buckets
                 and all(
-                    b.time_s - a.time_s <= policy.max_sample_gap_s
+                    b.time_s - a.time_s <= policy.max_continuous_sample_gap_s
                     for a, b in zip(window, window[1:])
                 )
                 and _anchor_pairs_compatible(window, distances, policy)
@@ -935,6 +1154,8 @@ def segment_tracks(
                 can_match_existing=can_match,
                 can_create_new_identity=can_create,
                 requires_external_anchor=requires_anchor,
+                independent_anchor_required=(start, end) in independent_anchor_ranges,
+                evidence_semantics=_semantics(status, reason, start, end, report.findings),
             )
             report.proposals.append(proposal)
             segments.append(segment)
