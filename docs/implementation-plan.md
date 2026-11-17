@@ -1,4 +1,4 @@
-# Vibe Coding 四阶段实施计划 (Implementation Plan)
+# 四阶段实施计划 (Implementation Plan)
 
 本计划将系统建设拆解为四个互不干扰、逐层演进的独立开发任务（T1 $\rightarrow$ T2 $\rightarrow$ T3 $\rightarrow$ T4）。每次启动对话或给 Agent 下发任务时，**直接复制对应小节的“任务指令卡”**，确保任务边界清晰可控。
 

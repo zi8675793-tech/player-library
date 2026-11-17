@@ -28,7 +28,7 @@
 
 | 文档 | 作用 |
 | :--- | :--- |
-| [AGENTS.md](AGENTS.md) | **项目协同指南**：Vibe Coding 研发纪律与执行守则 |
+| [AGENTS.md](AGENTS.md) | **项目协同指南**：SSOT、架构分层与常用验证命令 |
 | [docs/current-state.md](docs/current-state.md) | **唯一事实来源 (SSOT)**：当前最新进展、实测基准跑分与状态 |
 | [docs/architecture.md](docs/architecture.md) | **系统总体架构**：5 层分层拓扑与核心交互设计 |
 | [docs/pipeline.md](docs/pipeline.md) | **业务流水线规范**：端到端 8 阶段时序处理规范 |

@@ -1,4 +1,4 @@
-# player-library 协同开发指南 (Agent & Vibe Guidelines)
+# player-library 协同开发指南
 
 本文件是 `player-library` 项目的核心开发纪律与交互规范。进入本项目的任何 AI 开发者或工程师必须严格遵守。
 
@@ -25,29 +25,7 @@
 
 ---
 
-## 3. Vibe Coding 研发纪律（防止死循环与破坏式修改）
-
-为了防止大项目中“改动 A 破坏 B、越改越乱”的死循环，执行任务时必须严格执行以下原则：
-
-1. **单轮单一职责 (Single Responsibility per Turn)**：
-   - 每次对话只聚焦一个明确的模块（如：只写 OCR 特征提取器，或者只优化时空排他矩阵）。
-   - 严禁一次性提出“重构整个流水线并把评分提到 80%”的跨多层复合任务。
-2. **测试牢笼原则 (Test-Driven Safety)**：
-   - 编写或修改算法前，先锁定对应的单元测试或冒烟测试。
-   - 交付条件必须包含：`uv run pytest <target_test_file>` 全绿通过，并且 `uv run ruff check .` 无报错。
-3. **推理零作弊 (Zero Ground Truth During Inference)**：
-   - `test/annotations.csv` 和 `test/target/` 是期末考试的秘密答案，算法推理代码严禁导入、读取或反向引用这些路径。
-   - 特征中的球衣号码必须由算法模型（如 OCR）从 `test/track/*/samples/*.png` 自动推断。
-4. **产物留痕与交接 (Immutable Artifacts & Handoff)**：
-   - 所有实验运行、数据库生成的产物必须存放于 `var/<task-id>/run-<timestamp>/` 目录，严禁覆盖历史运行。
-   - 任务完成后，在对应运行目录下生成 `handoff.txt`，写明交付内容、复现命令、测试结果及下一个任务入口。
-5. **Git 存盘点纪律**：
-   - 每次任务通过测试后必须立刻 Commit 记录。
-   - 若当前轮次 AI 出现幻觉或过度重构，果断回滚到上一稳定节点，严禁顺着错误思路打补丁。
-
----
-
-## 4. 常用验证命令
+## 3. 常用验证命令
 
 ```bash
 # 运行单元测试
