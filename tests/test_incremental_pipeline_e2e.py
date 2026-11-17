@@ -586,15 +586,22 @@ def test_jersey_safety_checks_assigned_evidence_when_prototype_capacity_is_full(
     assert len(snapshot.players[0].prototypes) == 2
     assert all(proto.feature.jersey.number is None for proto in snapshot.players[0].prototypes)
 
+    # The 27 lives only on the assigned segment, not on a prototype. Planning
+    # must still treat it as physical evidence and defer the 10 instead of
+    # letting it reach the commit validator.
     conflicting = pipeline.segment(50, number=10)
-    with pytest.raises(StorageConflict, match="jersey"):
-        pipeline.submit([conflicting], expected=2, matcher=limited)
+    result = pipeline.submit([conflicting], expected=2, matcher=limited)
     snapshot = pipeline.snapshot()
-    assert snapshot.revision == 2
-    assert conflicting.segment_id not in snapshot.features
+    assert result.revision == snapshot.revision == 3
     assert snapshot.assignments[known.segment_id] == player_id
-    assert _count(pipeline.connection, "dual_stream_segments") == 3
-    assert _count(pipeline.connection, "workflow_operations") == 2
+    assert snapshot.assignments.get(conflicting.segment_id) != player_id
+    decision = snapshot.decisions[conflicting.segment_id]
+    # The 10 is physically separated, so it may seed its own numbered profile;
+    # it must never join the profile carrying 27 evidence.
+    assert decision.outcome in {DecisionOutcome.INSUFFICIENT, DecisionOutcome.CREATED_NEW}
+    assert decision.evidence.get("reason") != "matched_existing"
+    assert _count(pipeline.connection, "dual_stream_segments") == 4
+    assert _count(pipeline.connection, "workflow_operations") == 3
 
 
 def test_begin_immediate_precedes_snapshot_and_competing_writer_cannot_commit(pipeline):
