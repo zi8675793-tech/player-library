@@ -589,6 +589,35 @@
 - 下一个任务入口：**“每批即收敛 + reconcile 幂等”**——让每批 `update_dual_stream` 返回时即与规范重算一致，并让重复 `reconcile_canonical_revision` 在分组不变时 `changed=False` 且不推进 revision。
 - 产物与交接：`var/number-evidence-consistency/run-20261117T022306Z/`（改动 diff、红绿测试日志、103组账本与汇总、反例修复前后证据、三套官方评分、指纹与 `handoff.txt`）。
 
+## 24. 每批返回即规范一致与 reconcile 幂等（2026-11-17）
+
+**结论：§22/§23 遗留的“最终显式收敛后一致”已升级为“每批返回即规范一致”，reconcile 空转已停止。** 本轮只改批次收敛边界与幂等比较，未调任何距离/竞争边距/号码阈值，未改号码冲突语义、T1 特征、数据契约、模型或上游输入；leave-one-out 重估、cannot-link 排他、原型动态投影全部保留。同队换人（片段3）与黄金标注语义污染原样保留，仍不能正式交付。
+
+### 24.1 根因与代码改动
+- **根因1（每批不一致）**：`app/workflows/incremental.py` `_dual_stream_reassess` 应用规范分配时以 `sid not in snapshot.decisions` 过滤，本批新段被跳过，收敛责任被推给调用方的 `reconcile_canonical_revision`。
+- **根因2（reconcile 空转）**：`reconcile_canonical_revision` 无状态等价比较，分组不变也 `changed=True` 并推进 revision（11→12）。
+- **修复1**：规范分配遍历全部累计段（含本批新段），成为批次提交前的最后分配步骤；目标档案若为本批新建，决策保留 `CREATED_NEW` 语义与 `new_player_id` 证据（重映射到实际档案 ID），否则 `MATCHED_EXISTING`；canonical 证据中的 `new_player_id` 一并重映射。增量预分配与 LOO 保留，但提交前必然收敛到 canonical。
+- **修复2**：新增 `_canonical_state_equivalent`：比较 assignments、每段 decision 的 outcome/owner/关键证据（仅剔除 `reassessment`、`previous_player_id`、`canonical_recompute` 三个程序性标签）、player 集合与 `created_at_revision`/号码/名称、每档案原型段集合。完全相同则 `changed=False`、revision 不推进、不写任何审计行。
+- **修复3（验收可信度）**：`tests/audit/test_order_congruence_100.py` 不再无条件复用旧 AGC 报告；新增 `_audit_fingerprint`（6 个算法/测试源文件 + 冻结证据库的 SHA256）与 `load_or_run_audit`，报告指纹不匹配或缺失即真实重跑 100 组。本轮全套测试中该审计已真实重跑（741.82 秒，100/100 分区全等），新报告带 `input_fingerprint`。
+- **测试语义更新**：原 `test_new_queries_keep_fixed_revision_decisions_until_a_later_batch` 锁定的是缺陷症状（新段整批保留 R 决策），改写为 `test_new_queries_converge_to_canonical_within_the_same_batch`，锁定“新段当批即 canonical”。
+
+### 24.2 失败测试先红后绿
+- 新增 `tests/test_incremental_pipeline_e2e.py` 3 项（每批前缀==canonical、reconcile 幂等含 SQLite 字节级断言、正序/倒序/种子20261116 三顺序不调 reconcile 的每批一致性）与 `tests/audit/test_report_cache_gate.py` 4 项（无指纹/指纹不匹配必须重算、匹配才复用、指纹覆盖源码与证据）。
+- **红**：修复前 7 项全失败（`pytest-red.log`）：batch 2 的 `68_1_0`  live 待定而 canonical 已归档；第二次 reconcile `changed=True`；缓存门禁函数不存在。
+- **绿**：目标 28 项全过（`pytest-green-target.log`）；全套 `uv run pytest tests/ -q` **1074 passed, 1 skipped**（809.25 秒，含真实重跑的 100 组审计；唯一跳过为缺少旧版人工样例）；`uv run ruff check .` 通过，`uv run ruff format --check .` **190 files already formatted**。
+
+### 24.3 103 组冻结特征回放（不调 reconcile 的每批验收）
+- 沿用上一轮预先固定的 103 组排列与冻结特征（`5c468251…`），真实 `update_dual_stream` 从空库回放，`order_stress.py` 只读引用，推理零标注读取。
+- **620/620 个累计前缀**：每批返回后的分组+待定集合 == `recompute_canonical(前缀)`（同 matcher），**103/103 组全前缀一致**；上一轮该数字为 60 个前缀中 14 次。
+- **不调 reconcile**：103/103 最终分组、待定集合、27/15 号成员与正序基线一致；**0 异常、0 物理冲突、0 原型归属不一致**；同请求/同内容重放 `changed=False` 保持；integrity=ok、外键 0。
+- **幂等**：103/103 第二次 `reconcile_canonical_revision` `changed=False`、revision 不再推进（停在 11）；forward/reverse/previous_counterexample 三个文件库第二次调用前后 **SQLite 字节级完全一致**，五个审计表行数不变。边界说明：第一次 reconcile 仍会做一次证据标签/原型选择规范化（`first_changed=True`），幂等保证自第二次起成立。
+- **官方评分非回归**（预测先冻结、独立评分进程读标签，评分器/分母/标签未改）：正序、倒序、上轮失败顺序均 27号 **69/70**、15号 **48/48**、27号曝光 **62.1167秒**、已知混入 0、全库物理冲突 0、碎档 0，官方 PASS；与上一轮 `benchmark-summary.json` 逐项完全一致。
+
+### 24.4 交付边界与下一步
+- 本轮未处理同队同色 ID 切换（`3_6_0` 第260帧 CONLEY 10 仍归27号）、片段3黄金目标范围与标注污染；这些是交付前必须独立复核的事项，不能与算法修复混为一次实验。
+- **下一个任务入口：同队同色 ID 切换检测（片段 3）**——对同队同色轨迹内的换人变点做检测与切分，避免单一聚合特征代表混合身份帧；以第260帧原图/冻结框为反例，先独立复核目标标注范围再重评。
+- 产物与交接：`var/canonical-per-batch/run-20261117T031155Z/`（改动 diff、红绿测试日志、103组逐批账本 `orders-results.jsonl` 与汇总、幂等证据 `idempotency-evidence.json`、三套官方评分、指纹与 `handoff.txt`）。
+
 
 
 

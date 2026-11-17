@@ -970,10 +970,10 @@ def _dual_stream_reassess(snapshot, primary, segments, features, matcher, base_e
             cpid_to_gpid[cpid] = cplayer.player_id
             claimed_gpids.add(cplayer.player_id)
 
-    # Apply canonical assignments to reconcile any greedy misassignments
+    # Apply canonical assignments to every segment, including this batch's new
+    # ones, so the batch returns in the canonical state without a later reconcile.
+    original_ids = {player.player_id for player in snapshot.players}
     for sid in (s.segment_id for s in segments):
-        if sid not in snapshot.decisions:
-            continue
         target_cpid = canon_assignments.get(sid)
         target_gpid = cpid_to_gpid.get(target_cpid) if target_cpid else None
         curr_gpid = assignments.get(sid)
@@ -989,14 +989,29 @@ def _dual_stream_reassess(snapshot, primary, segments, features, matcher, base_e
                 ev["canonical_recompute"] = True
                 if old_owner is not None:
                     ev["previous_player_id"] = old_owner
-                decisions[sid] = IncrementalDecision(
-                    sid,
-                    DecisionOutcome.MATCHED_EXISTING,
-                    target_gpid,
-                    best_d,
-                    margin,
-                    ev,
-                )
+                if target_gpid not in original_ids:
+                    # The canonical owner is a profile created by this batch:
+                    # keep CREATED_NEW semantics and link the new player ID.
+                    ev["new_player_id"] = target_gpid
+                    decisions[sid] = IncrementalDecision(
+                        sid,
+                        DecisionOutcome.CREATED_NEW,
+                        None,
+                        best_d,
+                        margin,
+                        ev,
+                    )
+                else:
+                    if "new_player_id" in ev:
+                        ev["new_player_id"] = target_gpid
+                    decisions[sid] = IncrementalDecision(
+                        sid,
+                        DecisionOutcome.MATCHED_EXISTING,
+                        target_gpid,
+                        best_d,
+                        margin,
+                        ev,
+                    )
             else:
                 assignments.pop(sid, None)
                 decisions[sid] = IncrementalDecision(
@@ -1020,7 +1035,6 @@ def _dual_stream_reassess(snapshot, primary, segments, features, matcher, base_e
     for sid, pid in assignments.items():
         by_assigned_player[pid].append(sid)
 
-    original_ids = {player.player_id for player in snapshot.players}
     for pid in list(gallery.keys()):
         if pid not in original_ids and not by_assigned_player[pid]:
             del gallery[pid]
@@ -1443,6 +1457,50 @@ def update_dual_stream(
         return SuccessResponse(data=data, revision=plan.to_revision)
 
 
+def _canonical_state_equivalent(snapshot, players, assignments, decisions):
+    """Compare semantic state, ignoring procedural reassessment labels.
+
+    Evidence keys that only record how a decision was reached (which pass
+    reassessed it, its previous owner) are not part of the identity state.
+    """
+    if assignments != snapshot.assignments:
+        return False
+    if set(decisions) != set(snapshot.decisions):
+        return False
+    old_players = {player.player_id: player for player in snapshot.players}
+    new_players = {player.player_id: player for player in players}
+    if old_players.keys() != new_players.keys():
+        return False
+    for pid, old in old_players.items():
+        new = new_players[pid]
+        if (
+            old.created_at_revision != new.created_at_revision
+            or old.confirmed_jersey_number != new.confirmed_jersey_number
+            or old.display_name != new.display_name
+        ):
+            return False
+        if {proto.feature.segment_id for proto in old.prototypes} != {
+            proto.feature.segment_id for proto in new.prototypes
+        }:
+            return False
+    procedural = {"reassessment", "previous_player_id", "canonical_recompute"}
+    for sid, old_decision in snapshot.decisions.items():
+        new_decision = decisions[sid]
+        if old_decision.outcome != new_decision.outcome or _dual_stream_owner(
+            old_decision
+        ) != _dual_stream_owner(new_decision):
+            return False
+        old_evidence = {
+            key: value for key, value in old_decision.evidence.items() if key not in procedural
+        }
+        new_evidence = {
+            key: value for key, value in new_decision.evidence.items() if key not in procedural
+        }
+        if old_evidence != new_evidence:
+            return False
+    return True
+
+
 def reconcile_canonical_revision(
     connection: sqlite3.Connection,
     *,
@@ -1624,6 +1682,15 @@ def reconcile_canonical_revision(
             revision=rev + 1,
             matcher=matcher,
         )
+        if _canonical_state_equivalent(snapshot, final_players, assignments, decisions):
+            return SuccessResponse(
+                data={
+                    "changed": False,
+                    "committed_revision": rev,
+                    "reason": "already_canonical",
+                },
+                revision=rev,
+            )
         by_id = {p.player_id: p for p in final_players}
         new_players = tuple(by_id[pid] for pid in sorted(by_id.keys() - original_ids))
         plan = IncrementalPlan(

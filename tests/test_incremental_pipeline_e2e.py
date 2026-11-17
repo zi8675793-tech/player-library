@@ -6,7 +6,9 @@ packaging; model accuracy belongs to the separately frozen T1/T4 benchmark.
 """
 
 import math
+import random
 import sqlite3
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,7 +26,7 @@ from app.features.dual_stream import (
     TrackObservation,
 )
 from app.identity.constraints import SpatioTemporalConstraintEngine
-from app.identity.matching import DecisionOutcome, IncrementalMatcher
+from app.identity.matching import DecisionOutcome, IncrementalMatcher, recompute_canonical
 from app.storage.database import connect, transaction
 from app.storage.dual_stream import legacy_player_id, read_dual_stream_snapshot
 from app.storage.repositories import Repository, RevisionConflict, StorageConflict
@@ -397,7 +399,7 @@ def test_historical_snapshots_keep_pending_resolution_and_prototype_versions(pip
         read_dual_stream_snapshot(pipeline.connection, MATCH, revision=4)
 
 
-def test_new_queries_keep_fixed_revision_decisions_until_a_later_batch(pipeline):
+def test_new_queries_converge_to_canonical_within_the_same_batch(pipeline):
     pipeline.submit(
         [pipeline.segment(20, angle=0, number=None), pipeline.segment(6, angle=0, number=None)],
         expected=0,
@@ -411,11 +413,15 @@ def test_new_queries_keep_fixed_revision_decisions_until_a_later_batch(pipeline)
     pipeline.submit([*b_segments, ambiguous], expected=1, matcher=matcher)
     snapshot = pipeline.snapshot()
     assert len(snapshot.players) == 2
-    assert ambiguous.segment_id not in snapshot.assignments
-    assert snapshot.decisions[ambiguous.segment_id].outcome == DecisionOutcome.INSUFFICIENT
-    assert snapshot.decisions[ambiguous.segment_id].evidence["snapshot_revision"] == 1
-    assert sum(ambiguous.segment_id in call[0] for call in matcher.calls) == 1
     b_player = snapshot.assignments[b_segments[0].segment_id]
+    # The canonical baseline assigns the 115-degree query to the 70/80-degree
+    # profile; the batch must return that result instead of deferring it.
+    assert snapshot.assignments[ambiguous.segment_id] == b_player
+    assert snapshot.decisions[ambiguous.segment_id].evidence["canonical_recompute"] is True
+    assert _partition(
+        snapshot.assignments, [s.segment_id for s in snapshot.segments]
+    ) == _canonical_partition(snapshot)
+    assert sum(ambiguous.segment_id in call[0] for call in matcher.calls) == 1
     pipeline.submit([pipeline.segment(70, angle=80, number=None)], expected=2)
     assert pipeline.snapshot().assignments[ambiguous.segment_id] == b_player
 
@@ -627,3 +633,109 @@ def test_begin_immediate_precedes_snapshot_and_competing_writer_cannot_commit(pi
         assert _count(pipeline.connection, "dual_stream_segments") == 1
     finally:
         competing.close()
+
+
+def _partition(assignments, segment_ids):
+    groups = defaultdict(list)
+    for sid, pid in assignments.items():
+        groups[pid].append(sid)
+    return {
+        "clusters": sorted(sorted(group) for group in groups.values()),
+        "pending": sorted(set(segment_ids) - set(assignments)),
+    }
+
+
+def _canonical_partition(snapshot, matcher=None):
+    assignments, _, _ = recompute_canonical(
+        snapshot.segments, snapshot.features, matcher or IncrementalMatcher()
+    )
+    return _partition(assignments, [s.segment_id for s in snapshot.segments])
+
+
+def test_every_batch_return_matches_canonical_prefix(pipeline):
+    batches = [
+        [pipeline.segment(20, angle=0, number=None), pipeline.segment(6, angle=0, number=None)],
+        [
+            pipeline.segment(43, angle=70, number=None),
+            pipeline.segment(50, angle=80, number=None),
+            pipeline.segment(68, angle=115, number=None),
+        ],
+        [pipeline.segment(3, angle=20, number=27)],
+        [pipeline.segment(11, angle=25, number=27)],
+    ]
+    for expected, batch in enumerate(batches):
+        pipeline.submit(batch, expected=expected)
+        snapshot = pipeline.snapshot()
+        assert _partition(
+            snapshot.assignments, [s.segment_id for s in snapshot.segments]
+        ) == _canonical_partition(snapshot), f"batch {expected + 1} diverged from canonical"
+
+
+def test_reconcile_is_idempotent_when_state_is_canonical(pipeline):
+    pipeline.submit([pipeline.segment(20), pipeline.segment(6)], expected=0)
+    pipeline.submit([pipeline.segment(43, number=10), pipeline.segment(50, number=10)], expected=1)
+    pipeline.submit([pipeline.segment(3, angle=10, number=None)], expected=2)
+    first = workflow.reconcile_canonical_revision(pipeline.connection, match_id=MATCH)
+    settled = pipeline.snapshot()
+    counts_before = {
+        table: _count(pipeline.connection, table)
+        for table in ("revisions", "dual_stream_decisions", "dual_stream_profiles", "prototypes")
+    }
+    bytes_before = pipeline.db_path.read_bytes()
+    second = workflow.reconcile_canonical_revision(pipeline.connection, match_id=MATCH)
+    assert second.data["changed"] is False
+    assert second.revision == first.revision == settled.revision
+    assert pipeline.snapshot().assignments == settled.assignments
+    assert {table: _count(pipeline.connection, table) for table in counts_before} == counts_before
+    assert pipeline.db_path.read_bytes() == bytes_before
+
+
+def _make_pipeline(root):
+    appearance = ImageAppearance()
+    connection = connect(root / "t3.sqlite3")
+    return Pipeline(
+        root / "t3.sqlite3",
+        root / "track",
+        connection,
+        DualStreamExtractor(
+            root / "track", appearance_extractor=appearance, jersey_extractor=ImageJersey()
+        ),
+        appearance,
+    )
+
+
+def test_arrival_order_invariance_without_reconcile(tmp_path):
+    specs = {
+        "forward": [[20, 6], [43, 50, 68], [3]],
+        "reverse": [[3], [68, 50, 43], [6, 20]],
+    }
+    shuffled = [20, 6, 43, 50, 68, 3]
+    random.Random(20261116).shuffle(shuffled)
+    specs["seed20261116"] = [shuffled[i : i + 2] for i in range(0, len(shuffled), 2)]
+    angles = {20: 0, 6: 0, 43: 70, 50: 80, 68: 115, 3: 20}
+    numbers = {20: None, 6: None, 43: None, 50: None, 68: None, 3: 27}
+    finals = {}
+    for name, chunks in specs.items():
+        context = _make_pipeline(tmp_path / name)
+        try:
+            cumulative = []
+            for expected, chunk in enumerate(chunks):
+                batch = [
+                    context.segment(video, angle=angles[video], number=numbers[video])
+                    for video in chunk
+                ]
+                context.submit(batch, expected=expected)
+                cumulative.extend(batch)
+                snapshot = context.snapshot()
+                live = _partition(snapshot.assignments, [s.segment_id for s in snapshot.segments])
+                canonical_assign, _, _ = recompute_canonical(
+                    cumulative, snapshot.features, IncrementalMatcher()
+                )
+                expected_part = _partition(canonical_assign, [s.segment_id for s in cumulative])
+                assert live == expected_part, f"{name} batch {expected + 1} diverged"
+            finals[name] = _partition(
+                snapshot.assignments, [s.segment_id for s in snapshot.segments]
+            )
+        finally:
+            context.connection.close()
+    assert finals["forward"] == finals["reverse"] == finals["seed20261116"]
