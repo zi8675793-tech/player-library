@@ -1,0 +1,1738 @@
+{
+  "schema": "target-scope-visual-review-v2",
+  "review_status": "proposal_pending_human_final_signoff",
+  "reviewer": "Codex independent visual annotation audit",
+  "identity_basis": "visible jersey/name plus visual continuity; never frozen predicted identity or model OCR",
+  "clips": {
+    "11": {
+      "allowed_ranges": [
+        {
+          "track_id": 1,
+          "start_frame": 0,
+          "end_frame": 479,
+          "truth": "jersey:15",
+          "confidence": 0.96,
+          "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-11-fixed-samples.jpg",
+            "evidence/clip-11-range-review-1.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    },
+    "20": {
+      "allowed_ranges": [
+        {
+          "track_id": 3,
+          "start_frame": 0,
+          "end_frame": 239,
+          "truth": "jersey:27",
+          "confidence": 0.96,
+          "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-20-fixed-samples.jpg",
+            "evidence/clip-20-range-review-1.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    },
+    "3": {
+      "allowed_ranges": [
+        {
+          "track_id": 6,
+          "start_frame": 0,
+          "end_frame": 480,
+          "truth": "jersey:10",
+          "confidence": 0.99,
+          "reason": "同轨迹早段是绿色CONLEY 10，固定样本64/128/132/252/260/378/401与0–480连续图一致，不能继承27。",
+          "evidence_images": [
+            "evidence/clip-3-fixed-samples.jpg",
+            "evidence/clip-3-range-review-1.jpg",
+            "evidence/clip-3-range-review-2.jpg"
+          ]
+        },
+        {
+          "track_id": 6,
+          "start_frame": 481,
+          "end_frame": 510,
+          "truth": null,
+          "confidence": 0.0,
+          "reason": "原始track6此范围无观测；不跨缺口外推真实身份。",
+          "evidence_images": [
+            "evidence/clip-3-fixed-samples.jpg",
+            "evidence/clip-3-range-review-1.jpg",
+            "evidence/clip-3-range-review-2.jpg"
+          ]
+        },
+        {
+          "track_id": 6,
+          "start_frame": 511,
+          "end_frame": 531,
+          "truth": "jersey:30",
+          "confidence": 0.99,
+          "reason": "重新出现的框主目标为背面RANDLE 30；519固定样本清楚显示30，旁边局部27不得替代框内主目标身份。",
+          "evidence_images": [
+            "evidence/clip-3-fixed-samples.jpg",
+            "evidence/clip-3-range-review-1.jpg",
+            "evidence/clip-3-range-review-2.jpg"
+          ]
+        },
+        {
+          "track_id": 6,
+          "start_frame": 532,
+          "end_frame": 554,
+          "truth": null,
+          "confidence": 0.0,
+          "reason": "框内同时包含30和27，目标承载从前景30转向投篮27的精确边界需人工终签；保守留空，不计27曝光。",
+          "evidence_images": [
+            "evidence/clip-3-fixed-samples.jpg",
+            "evidence/clip-3-range-review-1.jpg",
+            "evidence/clip-3-range-review-2.jpg"
+          ]
+        },
+        {
+          "track_id": 6,
+          "start_frame": 555,
+          "end_frame": 779,
+          "truth": "jersey:27",
+          "confidence": 0.98,
+          "reason": "555帧起保守纳入投篮27，569/637/653清晰显示27，715及779由连续动作核验；不声称555为精确ID切换首帧。",
+          "evidence_images": [
+            "evidence/clip-3-fixed-samples.jpg",
+            "evidence/clip-3-range-review-1.jpg",
+            "evidence/clip-3-range-review-2.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [
+        390,
+        395,
+        400,
+        405,
+        410,
+        415,
+        420,
+        425,
+        430,
+        435,
+        440,
+        445,
+        450,
+        455,
+        460,
+        465,
+        470,
+        475,
+        480,
+        485,
+        490,
+        495,
+        500,
+        505,
+        510,
+        515,
+        520,
+        525,
+        530,
+        535,
+        540,
+        545,
+        550,
+        555,
+        560,
+        565,
+        570
+      ],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    },
+    "30": {
+      "allowed_ranges": [
+        {
+          "track_id": 5,
+          "start_frame": 0,
+          "end_frame": 899,
+          "truth": "jersey:15",
+          "confidence": 0.96,
+          "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-30-fixed-samples.jpg",
+            "evidence/clip-30-range-review-1.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    },
+    "37": {
+      "allowed_ranges": [
+        {
+          "track_id": 0,
+          "start_frame": 0,
+          "end_frame": 663,
+          "truth": "jersey:15",
+          "confidence": 0.96,
+          "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-37-fixed-samples.jpg",
+            "evidence/clip-37-range-review-1.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    },
+    "43": {
+      "allowed_ranges": [
+        {
+          "track_id": 9,
+          "start_frame": 199,
+          "end_frame": 659,
+          "truth": "jersey:27",
+          "confidence": 0.96,
+          "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-43-fixed-samples.jpg",
+            "evidence/clip-43-range-review-1.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    },
+    "50": {
+      "allowed_ranges": [
+        {
+          "track_id": 7,
+          "start_frame": 0,
+          "end_frame": 359,
+          "truth": "jersey:27",
+          "confidence": 0.96,
+          "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-50-fixed-samples.jpg",
+            "evidence/clip-50-range-review-1.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    },
+    "6": {
+      "allowed_ranges": [
+        {
+          "track_id": 4,
+          "start_frame": 0,
+          "end_frame": 779,
+          "truth": "jersey:27",
+          "confidence": 0.96,
+          "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-6-fixed-samples.jpg",
+            "evidence/clip-6-range-review-1.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    },
+    "63": {
+      "allowed_ranges": [
+        {
+          "track_id": 7,
+          "start_frame": 0,
+          "end_frame": 779,
+          "truth": "jersey:15",
+          "confidence": 0.96,
+          "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-63-fixed-samples.jpg",
+            "evidence/clip-63-range-review-1.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    },
+    "68": {
+      "allowed_ranges": [
+        {
+          "track_id": 8,
+          "start_frame": 0,
+          "end_frame": 960,
+          "truth": "jersey:27",
+          "confidence": 0.96,
+          "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-68-fixed-samples.jpg",
+            "evidence/clip-68-range-review-1.jpg",
+            "evidence/clip-68-range-review-2.jpg"
+          ]
+        },
+        {
+          "track_id": 13,
+          "start_frame": 1410,
+          "end_frame": 1679,
+          "truth": "jersey:27",
+          "confidence": 0.96,
+          "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。 原视频每30帧及范围端点可视复核；非逐帧人工终签。",
+          "evidence_images": [
+            "evidence/clip-68-fixed-samples.jpg",
+            "evidence/clip-68-range-review-1.jpg",
+            "evidence/clip-68-range-review-2.jpg"
+          ]
+        }
+      ],
+      "extra_evidence_frames": [],
+      "review_method": "visual fixed samples + original-video raw-bbox contact sheets at 30-frame stride; dense 5-frame review around clip3 transition; no model predictions used as truth"
+    }
+  },
+  "samples": [
+    {
+      "sample_id": "11-T00001-F0000013",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000013.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "9e5f208749a47e89759c1dd7dcd470e0ffe42472ebc351906e0e16513260808a"
+    },
+    {
+      "sample_id": "11-T00001-F0000049",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000049.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "0f34cdc7151c222991eed56b4608cd7e8094f181cb45611e8efaecbafb0b6206"
+    },
+    {
+      "sample_id": "11-T00001-F0000114",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000114.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "74bf23ed5e47f6f6a37cd8578f7a7a060634c915a6f2897fe1e8f78a588a786a"
+    },
+    {
+      "sample_id": "11-T00001-F0000158",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000158.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "2499743b7bf93bbb078b177f3794118d2938f5849369fb3eede77d0807c21e40"
+    },
+    {
+      "sample_id": "11-T00001-F0000160",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000160.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "d843b5ee36ee07f1574f6743707189de6b72b5e118156389bc0dd73cd72c2277"
+    },
+    {
+      "sample_id": "11-T00001-F0000226",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000226.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "6934e5bddde38d8d6ed228567300b0d03664d9cbd46ba472d66cb247ef79fbf6"
+    },
+    {
+      "sample_id": "11-T00001-F0000258",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000258.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "7699e5f0f9b0aca195efc6cf2c37b0533894ac98b68e1188d8264a4986c6f505"
+    },
+    {
+      "sample_id": "11-T00001-F0000314",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000314.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "5a1716bcedda1d34005ec633e67b464d3465ca869dc9ec3f5ba95b6ca4d0a673"
+    },
+    {
+      "sample_id": "11-T00001-F0000338",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000338.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "09f1875ffb028e5b0586a72903fdde5a1e979ef931d5dfef0f240697ab1348aa"
+    },
+    {
+      "sample_id": "11-T00001-F0000378",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000378.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "ff05af69b0d478396425021d9eb15c0ca8557a1bc3e6bbb353101f12c0c7bafb"
+    },
+    {
+      "sample_id": "11-T00001-F0000414",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000414.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "65e3e8dfe1a48c05d937432370073703307e08faad193310074d837c7737cbbc"
+    },
+    {
+      "sample_id": "11-T00001-F0000458",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/11-T00001-F0000458.png",
+        "evidence/clip-11-fixed-samples.jpg",
+        "evidence/clip-11-range-review-1.jpg"
+      ],
+      "crop_sha256": "a154e2cf6b8e94671dc490934e239506a0da1cc96fd2674f7a74c2f804689351"
+    },
+    {
+      "sample_id": "20-T00003-F0000008",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000008.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "e2326033ce39250d7151a19c3f9bc9cd7d56a32dcd1b7638c22c38a59288ed69"
+    },
+    {
+      "sample_id": "20-T00003-F0000033",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000033.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "b4f913870ce22985cb7db712e2a4f50e756606d10c67d1d65d613a041ea6bfae"
+    },
+    {
+      "sample_id": "20-T00003-F0000041",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000041.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "fb71f27c04d0139cc51a9be25e29a0e66fea12637d8b8c74ce00497f7b54c235"
+    },
+    {
+      "sample_id": "20-T00003-F0000065",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000065.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "bee1a4847fa7778af730f625a2f4671f9413bf8846f0d8e286736131997a20f1"
+    },
+    {
+      "sample_id": "20-T00003-F0000081",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000081.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "6ce1b94b5b103c5051a7a1324bf9189fca3893140c7b4510e56a02ff730e795b"
+    },
+    {
+      "sample_id": "20-T00003-F0000105",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000105.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "51353564ccd7bb758bbc8939fdb5757b7091e334c7edcb5d258decf4cd78e282"
+    },
+    {
+      "sample_id": "20-T00003-F0000121",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000121.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "a03601bd84ef06d493c6e1575175f68f9841004e435f6ff83c28aa7d0eb36b50"
+    },
+    {
+      "sample_id": "20-T00003-F0000153",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000153.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "c71ea7ea4e3ca49d175161da713b18c0d81b46d2c443845172b131ae0362b4f5"
+    },
+    {
+      "sample_id": "20-T00003-F0000161",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000161.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "0f7191d79709897d865baf588827a68d329cbe0ec83df87f8e3576075eaab0cc"
+    },
+    {
+      "sample_id": "20-T00003-F0000181",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000181.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "ad3c90470053ff93a3b46acc61ca0f1c4535f0b3b91e8f76d22f6a5cab4e7ce9"
+    },
+    {
+      "sample_id": "20-T00003-F0000205",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000205.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "20a7dadb279ac4b87450a4ecf279d64d3c02b2828ee5e2ef24a298487485f8da"
+    },
+    {
+      "sample_id": "20-T00003-F0000229",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号，侧面为主；胡须、白色护膝球鞋及投篮连续动作与27号参考图一致，不能仅凭该track ID认定。",
+      "evidence_images": [
+        "evidence/20-T00003-F0000229.png",
+        "evidence/clip-20-fixed-samples.jpg",
+        "evidence/clip-20-range-review-1.jpg"
+      ],
+      "crop_sha256": "aec96c1708f9a3404e1c1f517c7a3f446ebe382adde62a4367bd53d78f7d3e89"
+    },
+    {
+      "sample_id": "3-T00006-F0000064",
+      "suggested_truth": "jersey:10",
+      "confidence": 0.99,
+      "reason": "固定裁剪主目标为绿色10号；128/132正面10、252/260/378/401背面CONLEY 10与64同一外观，和原标27明显冲突。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000064.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "46daa0346d769f4a1e836a76866b65437d1fdf16834149d0f489b1971721560f"
+    },
+    {
+      "sample_id": "3-T00006-F0000128",
+      "suggested_truth": "jersey:10",
+      "confidence": 0.99,
+      "reason": "固定裁剪主目标为绿色10号；128/132正面10、252/260/378/401背面CONLEY 10与64同一外观，和原标27明显冲突。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000128.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "4a756ff98ccc732fc8ce54a6f390ed1dd48ee3057ac2fe798f74477ba8b9938c"
+    },
+    {
+      "sample_id": "3-T00006-F0000132",
+      "suggested_truth": "jersey:10",
+      "confidence": 0.99,
+      "reason": "固定裁剪主目标为绿色10号；128/132正面10、252/260/378/401背面CONLEY 10与64同一外观，和原标27明显冲突。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000132.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "495928fd663ccf12b3f6dae18a6e46506da8dfa61e94dc579aa5e20295d13675"
+    },
+    {
+      "sample_id": "3-T00006-F0000252",
+      "suggested_truth": "jersey:10",
+      "confidence": 0.99,
+      "reason": "固定裁剪主目标为绿色10号；128/132正面10、252/260/378/401背面CONLEY 10与64同一外观，和原标27明显冲突。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000252.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "634aa3f6463fc7ee198719c3e306a4ca808ad96740e2ac2777301c411d9159a5"
+    },
+    {
+      "sample_id": "3-T00006-F0000260",
+      "suggested_truth": "jersey:10",
+      "confidence": 0.99,
+      "reason": "固定裁剪主目标为绿色10号；128/132正面10、252/260/378/401背面CONLEY 10与64同一外观，和原标27明显冲突。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000260.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "5835054ae5fefd320052c2230f8dfe6756dc5c206fae04fa14dc0c1e77ca1609"
+    },
+    {
+      "sample_id": "3-T00006-F0000378",
+      "suggested_truth": "jersey:10",
+      "confidence": 0.99,
+      "reason": "固定裁剪主目标为绿色10号；128/132正面10、252/260/378/401背面CONLEY 10与64同一外观，和原标27明显冲突。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000378.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "92469230f82696ae095a54a61e1ce1ff8648f1284fcf2bee2f815d58210f7dc1"
+    },
+    {
+      "sample_id": "3-T00006-F0000401",
+      "suggested_truth": "jersey:10",
+      "confidence": 0.99,
+      "reason": "固定裁剪主目标为绿色10号；128/132正面10、252/260/378/401背面CONLEY 10与64同一外观，和原标27明显冲突。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000401.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "a50259badc7d8ae8ac5f03af36127901400457d167f2125068aac611246084ca"
+    },
+    {
+      "sample_id": "3-T00006-F0000519",
+      "suggested_truth": "jersey:30",
+      "confidence": 0.99,
+      "reason": "固定裁剪中心主目标背面明确为RANDLE 30；27仅在左侧部分出现，不能将整框/轨迹继承为27。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000519.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "878cbfb837c81085dc23fd893fa3b5ccb9abfe6fafdd27a0e00f717f450a8e87"
+    },
+    {
+      "sample_id": "3-T00006-F0000569",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；背面27/同一动作连续性与白色护膝球鞋一致，固定样本与原视频范围图交叉复核。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000569.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "d4d22563357c7595d8f2c84b799ddb63f247436bcaf788dcb9ad9fb26e888a9b"
+    },
+    {
+      "sample_id": "3-T00006-F0000637",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；背面27/同一动作连续性与白色护膝球鞋一致，固定样本与原视频范围图交叉复核。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000637.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "829fe4da530c73d5b04521e72dd192d9dfbaf937797a005c487cf0787ccadf52"
+    },
+    {
+      "sample_id": "3-T00006-F0000653",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；背面27/同一动作连续性与白色护膝球鞋一致，固定样本与原视频范围图交叉复核。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000653.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "68eb80f0c47586738b5faa89f37c317c05dd25362b56189b3dfca080c18e0798"
+    },
+    {
+      "sample_id": "3-T00006-F0000715",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；背面27/同一动作连续性与白色护膝球鞋一致，固定样本与原视频范围图交叉复核。",
+      "evidence_images": [
+        "evidence/3-T00006-F0000715.png",
+        "evidence/clip-3-fixed-samples.jpg",
+        "evidence/clip-3-range-review-1.jpg",
+        "evidence/clip-3-range-review-2.jpg"
+      ],
+      "crop_sha256": "5bb5c6f9af759d1f892a9525b7993033ed017a3fd02afbd4d418f6d02a7ad862"
+    },
+    {
+      "sample_id": "30-T00005-F0000019",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000019.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "9b24d51be1a69acce0bd9b698757294b4c5f01f4412596f2643d73af4447c828"
+    },
+    {
+      "sample_id": "30-T00005-F0000106",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000106.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "ed359672f22c0ac2752361d8290b1801bcd3f8de48198d98e0f263b4c0b6145e"
+    },
+    {
+      "sample_id": "30-T00005-F0000223",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000223.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "48398eb43ff4f609db7fe869ded89009f70531f6828b253047f8f8a4190d52e4"
+    },
+    {
+      "sample_id": "30-T00005-F0000239",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000239.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "998b5f94169f6b8e183bcca39300f7d0e80255a121dda298f10bd9b92041726f"
+    },
+    {
+      "sample_id": "30-T00005-F0000303",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000303.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "a76a1eb864d7b1f80cc4bb949015d73ae520af4e1aec4c93711bfc72091157ab"
+    },
+    {
+      "sample_id": "30-T00005-F0000415",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000415.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "f65051555a32c3882e8ad800f0536aa23bcfdb8e96c99ad5ed86027b8f04fbf6"
+    },
+    {
+      "sample_id": "30-T00005-F0000518",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000518.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "895bc905ca312fc38c7502343f6d80b327d414b3ff483c0337405379c0cf51e8"
+    },
+    {
+      "sample_id": "30-T00005-F0000527",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000527.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "e69aa54298e4bd73e90cadc50f5419390152cd6764f946f14515315a550fc2c0"
+    },
+    {
+      "sample_id": "30-T00005-F0000615",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000615.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "81bc0eea567817bc9cd21e25a7ededb908d3f204eaedffe4753ecbf64d657d8f"
+    },
+    {
+      "sample_id": "30-T00005-F0000719",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000719.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "0e0c5ebca1a8f6c690975b4fe72563ffc4f1f93bf3ff230b944f935060f4d654"
+    },
+    {
+      "sample_id": "30-T00005-F0000812",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000812.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "33ecf676b0d697a1de357acb5c3d191397b76cd72355a1bc5223a52df7b59898"
+    },
+    {
+      "sample_id": "30-T00005-F0000847",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，遮挡与倒地帧用原视频连续动作核验；不将前景绿色30视为该样本主目标。",
+      "evidence_images": [
+        "evidence/30-T00005-F0000847.png",
+        "evidence/clip-30-fixed-samples.jpg",
+        "evidence/clip-30-range-review-1.jpg"
+      ],
+      "crop_sha256": "784f8350e55813db0ea3bb40f7c3fb2abc85ddd2436e0debb322c0d82dfc932c"
+    },
+    {
+      "sample_id": "37-T00000-F0000043",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000043.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "1512cf2b0f965967ae6b1e55c3f3e2a4146f7b4f2c1e391551f9ba008d676084"
+    },
+    {
+      "sample_id": "37-T00000-F0000061",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000061.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "4de4235ee1bfd928c123c461c28b649cc2d9b7edfc3aa57a3cdcef02bd78df0d"
+    },
+    {
+      "sample_id": "37-T00000-F0000161",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000161.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "f362b998b2f6f32a83472cb55b615bc11514605fb22bef14e928250c16b51374"
+    },
+    {
+      "sample_id": "37-T00000-F0000167",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000167.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "d6b8262455bba331a719c86bae00448c4f64633b65255e543251919128bc4fb1"
+    },
+    {
+      "sample_id": "37-T00000-F0000240",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000240.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "551911a38b89ae7a15ed5ff54594d03cfef30005d737d2c1f4b4946e0bf8bbf5"
+    },
+    {
+      "sample_id": "37-T00000-F0000321",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000321.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "c0eca4925ccb2295f2ea0a8129dc4b35bd87f2110708c5c9ed80d59f519f7a3f"
+    },
+    {
+      "sample_id": "37-T00000-F0000337",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000337.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "6f87ff0cb059238a49407cf2c83a756d0ffd88fef3bba47f1e22827abdc86594"
+    },
+    {
+      "sample_id": "37-T00000-F0000442",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000442.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "1c770f5dd638098cbf5f96f0ac45899552aa0adaaa187baf1b433fa5ac7d1f3a"
+    },
+    {
+      "sample_id": "37-T00000-F0000450",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000450.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "5b364ee85e9f8e6d9b2a64b868cfbb8aa470a20e8f40b3069654c7b653e27dfa"
+    },
+    {
+      "sample_id": "37-T00000-F0000546",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000546.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "1e9a7d1ff102720bd6f7e022ec5a9ae71bb6795abe6331ab533e20c7f48f5670"
+    },
+    {
+      "sample_id": "37-T00000-F0000554",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000554.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "71fa6ef4d40132c94d27b7c0b0033bae3eaefdfc01bfef34fd5aae69a2d8b7d9"
+    },
+    {
+      "sample_id": "37-T00000-F0000658",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球至投篮连续性一致。",
+      "evidence_images": [
+        "evidence/37-T00000-F0000658.png",
+        "evidence/clip-37-fixed-samples.jpg",
+        "evidence/clip-37-range-review-1.jpg"
+      ],
+      "crop_sha256": "cf4f8d5c48de6de8106fd0858bb84b45bb159986ecd1a4aa7ff3b447a2e6df8b"
+    },
+    {
+      "sample_id": "43-T00009-F0000233",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000233.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "80309ce13cb923c588055a27e1fcf86283c902758dcccf07a3986630f3a6cebd"
+    },
+    {
+      "sample_id": "43-T00009-F0000273",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000273.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "38106928f554076d7eb847cd38e48cd4556f96678f7d8656cee5dab45a6f458d"
+    },
+    {
+      "sample_id": "43-T00009-F0000313",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000313.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "9a27a4dd3d045f356ddbcc59e04c1cf2be57f69696f463299960d78015e2737a"
+    },
+    {
+      "sample_id": "43-T00009-F0000329",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000329.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "e0bb1a032718b93f6482c21e44405c4611032cde53c120c04034c6cbd7867610"
+    },
+    {
+      "sample_id": "43-T00009-F0000353",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000353.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "4b0e1a16e59c5375a88866b4c9b1b57a5e5d7f6bd0a124b1200fe6bd6ea18688"
+    },
+    {
+      "sample_id": "43-T00009-F0000425",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000425.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "02517098c36c67c95e4f07767f5c1c2b1ac58ccd4f18107776ca52f56749f83f"
+    },
+    {
+      "sample_id": "43-T00009-F0000433",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000433.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "4b270f4dbdcad839d72b14c66d6af6f5626c499d9093f84701c78c24914711df"
+    },
+    {
+      "sample_id": "43-T00009-F0000481",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000481.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "f605708ef6f728372d65a0079719ee6127a8e3b979606846706acf5a227cad36"
+    },
+    {
+      "sample_id": "43-T00009-F0000513",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000513.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "b3699091a43d2a0440880e4ce52114f93bd021d4f0475c28d83ac0663c7e8338"
+    },
+    {
+      "sample_id": "43-T00009-F0000559",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000559.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "7a0b43461f20d1a597b5ef1347e8dfa64dcb91d4de950f2395eb5e4d15b4398f"
+    },
+    {
+      "sample_id": "43-T00009-F0000621",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000621.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "d54e60e3eaad81273eaba0d9372fd9b36918c81acb50f444807d2e3d653ae228"
+    },
+    {
+      "sample_id": "43-T00009-F0000655",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧背面GOBERT 27清晰；抬手遮挡帧按原视频连续性核验。",
+      "evidence_images": [
+        "evidence/43-T00009-F0000655.png",
+        "evidence/clip-43-fixed-samples.jpg",
+        "evidence/clip-43-range-review-1.jpg"
+      ],
+      "crop_sha256": "a6c2ec2028bc91cc759d08a5dcbf545ea601c062c5f2c5adbc9959312bd50d0a"
+    },
+    {
+      "sample_id": "50-T00007-F0000022",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000022.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "72d11dc771befaf2cd6d615beb6ea1acbf0a6919743eaf8da762c204ea10b503"
+    },
+    {
+      "sample_id": "50-T00007-F0000059",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000059.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "dd931d82062668500cd64fc08be7ccc85365ca2048ef808c78d199124be1e878"
+    },
+    {
+      "sample_id": "50-T00007-F0000064",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000064.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "e97bede6715ebef80dd7a438ad84655d68104e76681956d320e2dab5b9cd6be0"
+    },
+    {
+      "sample_id": "50-T00007-F0000114",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000114.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "092992171362de9388bf241a0a0a8f148b9a3bd55effcc6942154850c0a01ca9"
+    },
+    {
+      "sample_id": "50-T00007-F0000146",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000146.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "09a91f8f2d98a858c404f0b12d596666a060c74b4c531b12a6027ac414a72fcf"
+    },
+    {
+      "sample_id": "50-T00007-F0000172",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000172.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "e7126040970b34584d74d416edfac9a0d6be18ce0213765b376d0668b76abc90"
+    },
+    {
+      "sample_id": "50-T00007-F0000198",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000198.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "89536e34552d3ec284b3263ee574e34d6d5397dd056fe10ba30b4becb4eaf23d"
+    },
+    {
+      "sample_id": "50-T00007-F0000236",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000236.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "db540574d1d3b30cc306aac3b1183929e0bb17517a48d808985bb0662e28108d"
+    },
+    {
+      "sample_id": "50-T00007-F0000262",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000262.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "a6f2cc1d73df6f4d89db8497ad485d0be9159eb6326a7969e150a1dae5c04f9c"
+    },
+    {
+      "sample_id": "50-T00007-F0000282",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000282.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "f73ae9dda8cfa8f418195b173734c34b1c6a51ee003f03768b4e7084ca686ec3"
+    },
+    {
+      "sample_id": "50-T00007-F0000302",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000302.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "8f32f4c78eadf0e078ff56c16fc896683f4b428d9b7f9d1f3014593f0095b6ab"
+    },
+    {
+      "sample_id": "50-T00007-F0000330",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.93,
+      "reason": "绿色27号；前后可读27、白色双护膝与球鞋一致；330帧被黄23遮挡，结合302及359原视频同一动作核验。",
+      "evidence_images": [
+        "evidence/50-T00007-F0000330.png",
+        "evidence/clip-50-fixed-samples.jpg",
+        "evidence/clip-50-range-review-1.jpg"
+      ],
+      "crop_sha256": "8c727253a8637761cec624d8544724d9208442f53f64694e6c35872e877f60b8"
+    },
+    {
+      "sample_id": "6-T00004-F0000042",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000042.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "fe4595bc47d2afbf9ad6c3de2a671b2b2b18b769b0ec87c2f4e5346de38892ac"
+    },
+    {
+      "sample_id": "6-T00004-F0000074",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000074.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "901dc7caafaa0afd26473d53ad24b024c1b3d007669a9196ef045ff514699b35"
+    },
+    {
+      "sample_id": "6-T00004-F0000162",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000162.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "c4a34dce2413252a470658bb8e849fd63208deccc1fe72e0fbe9ad54b26152a3"
+    },
+    {
+      "sample_id": "6-T00004-F0000202",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000202.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "0801bd3bd77fb0a285c51380dd48fc87487ab33603128e935671f539d81f35c7"
+    },
+    {
+      "sample_id": "6-T00004-F0000262",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000262.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "0239778f7274690fb2067bd53f816c77ee3959f72c7b1ac909e7f3177954e5ea"
+    },
+    {
+      "sample_id": "6-T00004-F0000379",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000379.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "3d7d58526624fa290360f84827406595c53b9fe49837e2e15c0db4827d78788a"
+    },
+    {
+      "sample_id": "6-T00004-F0000443",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000443.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "3f486b8f17a3176ce647fc06952a5a131d98f337538b08fed2fac421a0c93f8b"
+    },
+    {
+      "sample_id": "6-T00004-F0000459",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000459.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "e48d86d2690012a8e814a621edd5706a82bc793d10e25071bd43550d3385c592"
+    },
+    {
+      "sample_id": "6-T00004-F0000563",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000563.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "146e81ae64ccf63b79bb73a176b9bd2b8832cfcbe43add0933a2edb763194755"
+    },
+    {
+      "sample_id": "6-T00004-F0000587",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000587.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "426f48da946535f0c80a8cfd0cea2e7a059efddcd7258e75926de29719a5cbdc"
+    },
+    {
+      "sample_id": "6-T00004-F0000657",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000657.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "010015b4f9bbb9ab6be629495225160480406a32fe2d33c4ecaedc700fce65d3"
+    },
+    {
+      "sample_id": "6-T00004-F0000715",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号，多帧正面27清晰；侧身和抬手样本按独立原视频连续性核验。",
+      "evidence_images": [
+        "evidence/6-T00004-F0000715.png",
+        "evidence/clip-6-fixed-samples.jpg",
+        "evidence/clip-6-range-review-1.jpg"
+      ],
+      "crop_sha256": "47aecfb9b7dcea08784efc4f98373d2614537898dbc89b169043677f3402d162"
+    },
+    {
+      "sample_id": "63-T00007-F0000062",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000062.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "035eeaadc080929c29b9caceabbe9938ae82c25b569852a4570f3fafdb75fa67"
+    },
+    {
+      "sample_id": "63-T00007-F0000128",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000128.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "83034c017d5b117054b20f91606aeac6539071e26eb8c2e1fd1ac0cecc397ab7"
+    },
+    {
+      "sample_id": "63-T00007-F0000148",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000148.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "87e7cfc7e9620c781d6a488316e17c0ed343beb217e376b8fd2a4b6c89d987d5"
+    },
+    {
+      "sample_id": "63-T00007-F0000204",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000204.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "c3b1bd8498fc90048f58ccf87dc89c789fda0d4549905882766fe4f86181bd35"
+    },
+    {
+      "sample_id": "63-T00007-F0000304",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000304.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "9c1ddedcc0ea0f12560e666e77bc4153c05053c8a08a252f058efa80ca94ff3b"
+    },
+    {
+      "sample_id": "63-T00007-F0000360",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000360.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "e9a2bab48bca1d028d541bf88a64668daf38724866951ce0ae52bf9bf96d9b44"
+    },
+    {
+      "sample_id": "63-T00007-F0000404",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000404.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "e23d658d7a72e58fdefe6f87c172dd3d059f5514fa23d3203e96566268f7be4c"
+    },
+    {
+      "sample_id": "63-T00007-F0000469",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000469.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "5487d8583868831cf8699c5925092218845271cadf2a23d7b279940b679ddc1a"
+    },
+    {
+      "sample_id": "63-T00007-F0000553",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000553.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "8493a7d556af37a53bea7522005a36f5afa127117bc1d7a8251253ffdc0b2d69"
+    },
+    {
+      "sample_id": "63-T00007-F0000643",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000643.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "6773736d9366068dd485236e0f695ac29e9d71e1096f9ef4ffa2930255004a98"
+    },
+    {
+      "sample_id": "63-T00007-F0000697",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000697.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "0e6fa6d0e01450c751774ddbf4abdd63460d4619bcccf0058838136947d893aa"
+    },
+    {
+      "sample_id": "63-T00007-F0000769",
+      "suggested_truth": "jersey:15",
+      "confidence": 0.98,
+      "reason": "黄色15号、白头带；正背面15可读，运球投篮连续性一致。",
+      "evidence_images": [
+        "evidence/63-T00007-F0000769.png",
+        "evidence/clip-63-fixed-samples.jpg",
+        "evidence/clip-63-range-review-1.jpg"
+      ],
+      "crop_sha256": "486a1ee6a0eb936449d98feb19a728cc77b4dbbaf12315641f29312a639d1dd3"
+    },
+    {
+      "sample_id": "68-T00008-F0000132",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00008-F0000132.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "639148a07d07074d2630b6a4adbf0c946aa3057238b2490322325d9b7b12e4aa"
+    },
+    {
+      "sample_id": "68-T00008-F0000172",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00008-F0000172.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "4c89320dd75722ca6791873f984dda4a6f95de3b440dbffef3f62aad08fc8f6b"
+    },
+    {
+      "sample_id": "68-T00008-F0000416",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00008-F0000416.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "76f357bf69f5ddc49a7c4545867b4b61998c65e4aadcfdaf06062dc4d478bbf8"
+    },
+    {
+      "sample_id": "68-T00008-F0000548",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00008-F0000548.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "f01e727edb0536a02f768c587c26ba978d22465a795993799d9fecff1d41ec15"
+    },
+    {
+      "sample_id": "68-T00008-F0000684",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00008-F0000684.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "0cb79486e754420fd3cf8950fef3e6195e9ae9b72d507cf2b681794f06ed3a33"
+    },
+    {
+      "sample_id": "68-T00008-F0000716",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00008-F0000716.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "59ef4a2b24a4e82c8932d6b891b9cb1090540c62c56c7fd69e5a4cd65389cbc7"
+    },
+    {
+      "sample_id": "68-T00008-F0000921",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00008-F0000921.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "98e2593dd46bab93049eead449b6cdb67abba842b7ae22e4e3b9fb04badd6e94"
+    },
+    {
+      "sample_id": "68-T00013-F0001461",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00013-F0001461.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "1de722a60accde6a48e2173017103cadcdb539df22b035298bbf2b50d23e82a5"
+    },
+    {
+      "sample_id": "68-T00013-F0001573",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00013-F0001573.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "8bfe0a9810ef3d57078719e3b47099005b36c4a542c1e7e875e4ce0b779998db"
+    },
+    {
+      "sample_id": "68-T00013-F0001615",
+      "suggested_truth": "jersey:27",
+      "confidence": 0.98,
+      "reason": "绿色27号；只复核原选择T8 0–960/T13 1410–1679，不把轨迹其他范围继承为27；正背面27及连续动作一致。",
+      "evidence_images": [
+        "evidence/68-T00013-F0001615.png",
+        "evidence/clip-68-fixed-samples.jpg",
+        "evidence/clip-68-range-review-1.jpg",
+        "evidence/clip-68-range-review-2.jpg"
+      ],
+      "crop_sha256": "af53b3a65dde8e6216f0d721fd0f04a724481626013cd76f56c3a8154799ebcd"
+    }
+  ],
+  "limitations": [
+    "Confidence values are ordinal reviewer judgements, not calibrated probabilities.",
+    "Track3 532–554 composite transition and exact switching boundaries require final human confirmation.",
+    "Unclear single frames use original-video continuity; 30-frame contact strips do not constitute exhaustive per-frame identity certification."
+  ]
+}
