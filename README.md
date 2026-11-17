@@ -33,20 +33,9 @@
 | [docs/architecture.md](docs/architecture.md) | **系统总体架构**：5 层分层拓扑与核心交互设计 |
 | [docs/pipeline.md](docs/pipeline.md) | **业务流水线规范**：端到端 8 阶段时序处理规范 |
 | [docs/data-contracts.md](docs/data-contracts.md) | **数据契约规范**：冻结的强类型数据模型与 Schema |
-| [docs/implementation-plan.md](docs/implementation-plan.md) | **实施计划与任务模板**：四阶段实施计划与即取即用任务指令卡 |
+| [docs/implementation-plan.md](docs/implementation-plan.md) | **实施计划**：四阶段目标、实现要点与验收命令 |
 | [docs/evaluation-harness.md](docs/evaluation-harness.md) | **独立评测防火墙**：防作弊独立打分与 70 分母验收标准 |
 | [docs/storage.md](docs/storage.md) | **SQLite 存储规范**：数据库表结构、迁移与 Revision R 规范 |
-
----
-
-## 四阶段执行任务卡 (即取即用)
-
-开发时可直接将对应任务卡全文复制发给 Agent：
-
-- **阶段一 (T1)**: [01-dual-stream-feature.md](docs/tasks/01-dual-stream-feature.md) - 双流特征提取器构建（OCR 号码流 + 深度外观流）
-- **阶段二 (T2)**: [02-constraints-and-matching.md](docs/tasks/02-constraints-and-matching.md) - 时空硬排他与多原型增量匹配引擎
-- **阶段三 (T3)**: [03-workflow-and-storage.md](docs/tasks/03-workflow-and-storage.md) - 流水线组装与 SQLite 版本化原子存储
-- **阶段四 (T4)**: [04-golden-evaluation.md](docs/tasks/04-golden-evaluation.md) - 独立黄金评测与达标验收
 
 ---
 
