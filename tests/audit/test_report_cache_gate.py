@@ -10,11 +10,18 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT))
 
 MODULE_PATH = Path(__file__).resolve().parent / "test_order_congruence_100.py"
 PRIMARY = PROJECT / "var" / "runs" / "run-phase2-split-final"
+
+pytestmark = pytest.mark.skipif(
+    not (PRIMARY / "player-library.sqlite3").is_file(),
+    reason="frozen run evidence not available (var/ is not distributed)",
+)
 
 
 def _load_module():

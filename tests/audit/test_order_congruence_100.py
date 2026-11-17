@@ -18,6 +18,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 PROJECT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT))
 
@@ -36,7 +38,7 @@ from app.workflows.incremental import (  # noqa: E402
 
 MATCH_ID = "t3-real-basketball"
 ALL_CLIPS = ("3", "6", "11", "20", "30", "37", "43", "50", "63", "68")
-DELIVERABLES_DIR = Path("/Users/ahs/Documents/agc")
+DELIVERABLES_DIR = PROJECT / "var" / "audits"
 FINGERPRINT_SOURCES = (
     "app/identity/matching.py",
     "app/identity/constraints.py",
@@ -426,7 +428,8 @@ def execute_100_runs_audit(
 def test_order_congruence_100_audit():
     """Pytest entrypoint for 100-permutation congruence verification."""
     primary_dir = PROJECT / "var" / "runs" / "run-phase2-split-final"
-    assert primary_dir.exists(), f"Primary run evidence directory missing: {primary_dir}"
+    if not primary_dir.exists():
+        pytest.skip(f"Primary run evidence directory missing: {primary_dir}")
 
     out_json = DELIVERABLES_DIR / "congruence-100-runs.json"
     summary = load_or_run_audit(primary_dir, out_json)
