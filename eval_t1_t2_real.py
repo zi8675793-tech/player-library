@@ -1,22 +1,21 @@
-"""End-to-End Real Evaluation of Stage 1 (T1) and Stage 2 (T2).
+"""[DEPRECATED / HISTORICAL ONLY] End-to-End Real Evaluation of Stage 1 (T1) and Stage 2 (T2).
 
-Tests the dual-stream feature extractor (EasyOCR + ResNet18) and the
-spatio-temporal hard constraint and multi-prototype matching engine on real
-test data from `../test` without cheating or leaking ground-truth annotations
-during inference.
+WARNING: This historical evaluation script manually selected 11 target segments from
+`test/target/{clip}/selection.json` and injected artificial seed profiles (p27, p15)
+at revision 1, which bypassed full cold-start discovery and produced an unverified
+artificial score of 24/70.
 
-Usage:
+For the official, cheat-free, fully automatic end-to-end evaluation with independent
+T4 firewall scoring, please use:
     cd player-library
-    uv run python eval_t1_t2_real.py
+    uv run python run_e2e_benchmark.py
 """
 
-import hashlib
 import json
-import math
 import sys
 from collections import defaultdict
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -29,24 +28,20 @@ TEST_ROOT = (PROJECT_ROOT.parent / "test").resolve()
 
 from app.features.appearance import AppearanceExtractor  # noqa: E402
 from app.features.dual_stream import (  # noqa: E402
-    DualStreamExtractor,
     DualStreamFeature,
-    TrackObservation,
     TrackletSegment,
+    TrackObservation,
 )
 from app.features.jersey_number import (  # noqa: E402
     JerseyNumberExtractor,
     assess_image_quality,
 )
 from app.identity.constraints import (  # noqa: E402
-    CannotLinkConstraint,
     SpatioTemporalConstraintEngine,
 )
 from app.identity.matching import (  # noqa: E402
     DecisionOutcome,
-    IncrementalDecision,
     IncrementalMatcher,
-    IncrementalPlan,
     PlayerProfile,
     PlayerPrototype,
     _cosine,
@@ -239,9 +234,13 @@ def run_t2_cannot_link_evaluation():
             "valid_tracks": len(segments),
             "cannot_link_edges": edge_count,
         }
-        print(f"  Clip {clip:>2}: {len(segments):>2} 条有效轨迹 -> 建立 {edge_count:>3} 条同机位同帧绝对排他边")
+        print(
+            f"  Clip {clip:>2}: {len(segments):>2} 条有效轨迹 -> 建立 {edge_count:>3} 条同机位同帧绝对排他边"
+        )
 
-    print(f"\n[OK] 全量 10 个片段共识别并建立了 {total_edges} 条物理 Cannot-Link 强排他边，同帧冲突率 100% 阻断。")
+    print(
+        f"\n[OK] 全量 10 个片段共识别并建立了 {total_edges} 条物理 Cannot-Link 强排他边，同帧冲突率 100% 阻断。"
+    )
     return clip_stats, total_edges
 
 
@@ -336,7 +335,6 @@ def evaluate_matching_and_scoring(features, segments, gt_jersey_map, gt_sample_c
     total_27_samples = 70
     covered_27_samples = gt_sample_counts[seg_20.segment_id]  # Seed is covered (12)
     purity_violations = []
-    physical_conflicts = 0
     decision_records = []
 
     # Record the seed
@@ -366,8 +364,7 @@ def evaluate_matching_and_scoring(features, segments, gt_jersey_map, gt_sample_c
                 covered_27_samples += count
                 correct = True
             elif (
-                d.outcome == DecisionOutcome.MATCHED_EXISTING
-                and d.target_player_id == "player_15"
+                d.outcome == DecisionOutcome.MATCHED_EXISTING and d.target_player_id == "player_15"
             ):
                 loss_reason = "leaked_into_player_15"
                 purity_violations.append(
@@ -415,11 +412,15 @@ def evaluate_matching_and_scoring(features, segments, gt_jersey_map, gt_sample_c
         )
 
     coverage_rate = covered_27_samples / total_27_samples
-    print(f"\n[BENCHMARK] 27 号样本命中覆盖: {covered_27_samples} / {total_27_samples} ({coverage_rate * 100:.1f}%)")
-    print(f"            合格红线: >= 57 / 70 (81.4%) | 当前达成: {'PASS' if covered_27_samples >= 57 else 'FAIL'}")
-    print(f"            已知异人混入 27 号档案数: 0 项 (零容忍 PASS)")
+    print(
+        f"\n[BENCHMARK] 27 号样本命中覆盖: {covered_27_samples} / {total_27_samples} ({coverage_rate * 100:.1f}%)"
+    )
+    print(
+        f"            合格红线: >= 57 / 70 (81.4%) | 当前达成: {'PASS' if covered_27_samples >= 57 else 'FAIL'}"
+    )
+    print("            已知异人混入 27 号档案数: 0 项 (零容忍 PASS)")
     print(f"            27 号误漏入 15 号档案项数: {len(purity_violations)} 个轨迹段")
-    print(f"            同机位物理冲突数: 0 项 (零冲突 PASS)")
+    print("            同机位物理冲突数: 0 项 (零冲突 PASS)")
 
     benchmark_summary = {
         "player_27_denominator": total_27_samples,
@@ -447,7 +448,7 @@ def generate_evaluation_deliverables(
     labels,
 ):
     """Generate Markdown and JSON reports and save to required directories."""
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     report_lines = [
         "# 阶段一 (T1) 与 阶段二 (T2) 真实端到端评测基准报告",
@@ -603,13 +604,19 @@ def generate_evaluation_deliverables(
 
 
 def main():
+    print("!" * 80)
+    print("【警告：本脚本 eval_t1_t2_real.py 为早期包含人工种子注入 (p27, p15) 的历史单测】")
+    print(
+        "【正式无作弊、无人工种子的统一端到端评测流水线请使用：uv run python run_e2e_benchmark.py】"
+    )
+    print("!" * 80)
     print("=" * 80)
     print("【前两个阶段（T1 双流特征 + T2 约束匹配）真实端到端全量综合评测】")
     print("=" * 80)
 
     # Step 1: Load real evidence
     segments, crop_images, gt_jersey_map, gt_sample_counts = load_real_target_evidence()
-    print(f"[OK] 成功装配 10 个进球片段中的 11 个目标轨迹段与 118 个真实人体切片。")
+    print("[OK] 成功装配 10 个进球片段中的 11 个目标轨迹段与 118 个真实人体切片。")
 
     # Step 2: Run T1 feature extraction
     features, ocr_diag, app_diag = run_t1_real_extraction(segments, crop_images)

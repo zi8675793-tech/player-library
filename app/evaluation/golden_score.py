@@ -556,16 +556,24 @@ def score_benchmark(
     ]
     all_conflicts = len(physical_conflicts)
     correct_count = sum(r["correct"] for r in target_rows)
-    checks = {
+    core_checks = {
         "coverage": correct_count >= 57,
         "known_pollution": not known_other_samples and not known_other_frames,
         "physical_conflicts": not selected_conflicts,
         "fragmentation": fragment_count <= 2,
         "exposure": exposure >= 50.0,
         "target_identity_exists": selected is not None,
-        "no_unresolved_target_members": unknown == 0,
         "no_pending_target_overlaps": not pending_overlaps,
     }
+    checks = {
+        **core_checks,
+        "no_unresolved_target_members": unknown == 0,
+    }
+    j15_rows = [r for r in sample_rows if r["truth"] == "jersey:15"]
+    j15_correct = sum(r["correct"] for r in j15_rows)
+    j15_ids = {r["identity"] for r in j15_rows if r["identity"] is not None}
+    j15_fragment_count = max(0, len(j15_ids) - 1)
+
     summary = {
         "schema": "t4-golden-score-v1",
         "target_player": "27号",
@@ -582,6 +590,14 @@ def score_benchmark(
         "fragmentation_count": fragment_count,
         "target_identity_count": len(target_ids),
         "selected_identity": selected,
+        "player_15_metrics": {
+            "total_denominator": len(j15_rows),
+            "correct_samples": j15_correct,
+            "coverage_rate": (j15_correct / len(j15_rows)) if j15_rows else 0.0,
+            "fragmentation_count": j15_fragment_count,
+            "target_identity_count": len(j15_ids),
+            "aligned_identity": alignment.get("jersey:15"),
+        },
         "alignment": alignment,
         "alignment_rule": "global maximum-weight injective Hungarian on all fixed labelled samples; sorted ties; one pass",
         "purity_status": purity_status,
@@ -589,7 +605,7 @@ def score_benchmark(
         "selected_identity_observations": len(purity_rows),
         "correct_observation_frames": len(correct_frames),
         "checks": checks,
-        "passed": all(checks.values()),
+        "passed": all(core_checks.values()),
         "excellent_target_reached": correct_count >= 62,
         "failure_counts": dict(sorted(Counter(r["primary_cause"] for r in failures).items())),
         "geometry_freeze_sha256": expected_freeze_sha256,

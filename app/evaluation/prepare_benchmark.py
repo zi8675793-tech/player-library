@@ -70,7 +70,14 @@ def database_evidence(run, predictions):
                 raise ValueError(f"Prediction/database decision mismatch: {sid}")
             decision = row["decision"]
             assigned = decision["outcome"] in ("matched_existing", "created_new_identity")
-            pid = decision["target_player_id"] if assigned else None
+            pid = (
+                (
+                    decision.get("target_player_id")
+                    or decision.get("evidence", {}).get("new_player_id")
+                )
+                if assigned
+                else None
+            )
             if pid != row["player_id"] or (assigned and not pid):
                 raise ValueError("Invalid decision identity projection")
             projection = conn.execute(

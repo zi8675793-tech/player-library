@@ -24,7 +24,7 @@ def main():
     out = args.out_dir or Path("var/benchmarks") / datetime.now(UTC).strftime(
         "run-%Y%m%dT%H%M%S-%f"
     )
-    out.mkdir(parents=True, exist_ok=False)
+    out.mkdir(parents=True, exist_ok=True)
     prepare = subprocess.run(
         [
             sys.executable,
