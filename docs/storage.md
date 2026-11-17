@@ -1,6 +1,8 @@
-# SQLite 存储层
+# SQLite 存储层规范
 
-本层保存和还原已有契约事实；不执行身份匹配、生成正式 player_id、处理人工命令或解析事件归属。工作流、事件关联与统计已实现，UI 尚未实现。`connect(database_path(settings))` 才创建数据库和父目录；加载配置及只读 `validate` 不会打开数据库。数据库名集中为 `player-library.sqlite3`，位于 `settings.paths.runtime_root`。每个连接启用外键及锁等待，打开时按顺序执行校验过的增量迁移（001 至 010）；迁移整体失败回滚，不删除数据库或重编号球员。
+本文档描述系统的业务持久化存储层。当前最新进展与基准见 [current-state.md](current-state.md)，整体架构见 [architecture.md](architecture.md)，流水线集成见 [pipeline.md](pipeline.md)。
+
+本项目采用强类型 SQLite 驱动，所有写操作遵循 `BEGIN IMMEDIATE` 排他事务隔离，以比赛（`match_id`）和版本修订号（`revision`）作为核心作用域，支持中断续跑、幂等重放与不可变审计追踪。现有数据库迁移脚本为 001 至 012。
 
 ## 模型与关系
 
@@ -198,6 +200,18 @@ CREATE INDEX IF NOT EXISTS idx_players_role ON players(match_id, json_extract(js
 
 ### 核心设计特性
 
-1. **表物理结构零变更**：维持 `players` 表历史经典的 4 列物理结构（`match_id`, `player_id`, `created_revision`, `json`）完全不变，100% 保持历史仓储代码、SQL 查询与单元测试的二进制级兼容。
-2. **角色域过滤加速**：通过 SQLite 原生 `json_extract(json, '$.role')` 表达式索引，使 `PlayerQuery(formal_players_only=True)` 与 `get_formal_player_stats` 能够直接走 B-Tree 索引跳过非球员档案（如 `unknown_role` 匿名档案、裁判与工作人员），杜绝全表扫描。
+1. **表结构不变**：`players`物理列为`match_id, player_id, alias_of, json`，迁移010只增加角色表达式索引。
+2. **角色域索引**：提供`json_extract(json, '$.role')`查询索引。具体查询是否利用该索引取决于SQL及查询计划，不能由索引存在推断所有工作流都直接走索引。
 3. **平滑升级与默认隔离**：历史旧记录的 JSON 未显式包含 role 字段时，Pydantic 契约反序列化默认解析为 `PersonRole.UNKNOWN_ROLE`（匿名档案），被下游正式球员统计与事件排行榜自动过滤，只有通过人工复核或特定策略确认为 `PersonRole.PLAYER` 后才计入正式榜单。
+
+覆盖率阶段2：新的分段语义、独立档案见证要求及机器重复候选 basis 随既有 JSON 持久化。
+没有新迁移，也未修改001~012。恢复的局部曝光只产生 proposed 关联，不增加模板或伪造人工批准。
+历史原始运行与输入不回写；当前策略应在全新运行目录验证，不能直接重解释已有人工归属。
+
+## 匹配诊断与增量操作状态 迁移011和012
+
+迁移011新增`matching_diagnostics`，按比赛和audit_key保存匹配尝试、快照版本、阶段及JSON；它是不可变诊断，不作为身份事实或修订恢复内容。
+
+迁移012新增`incremental_operations`，主键为`(match_id, operation_key, phase)`，保存status、snapshot_revision、committed_revision、payload_hash和result_json。旧版增量入口记录主提交、关联补算和完成状态；主提交成功后补算失败不会回滚已提交结果，普通重放续跑补算。
+
+该操作记录不保存原版OMZ tracker的全部内存状态，不能当成新引擎检查点。业务库恢复与引擎恢复由T4分别验证。

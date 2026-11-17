@@ -1,109 +1,131 @@
-# 实施计划与全阶段交付报告 (Implementation Plan & Final Delivery Review)
+# Vibe Coding 四阶段实施计划 (Implementation Plan)
 
-## 1. 计划全景与演进里程碑
+本计划将系统建设拆解为四个互不干扰、逐层演进的独立开发任务（T1 $\rightarrow$ T2 $\rightarrow$ T3 $\rightarrow$ T4）。每次启动对话或给 Agent 下发任务时，**直接复制对应小节的“任务指令卡”**，确保任务边界清晰可控。
 
-本项目旨在构建一个高鲁棒、通用的比赛内球员身份发现与事件管理模块。历经基础架构搭建（M1~M6）与全面的 7 阶段身份修复计划（阶段 0 至阶段 6），已达成全案高质量交付。
+---
 
-```mermaid
-flowchart LR
-    M1_M6["M1~M6: 基础架构与V1闭环\n(契约/存储/工作流/无答案基线)"] --> STAGE0["阶段 0: 评测基线修正\n(固定分母 / 7级漏斗 / 工具除虫)"]
-    STAGE0 --> STAGE1["阶段 1: 距离空间诊断\n(校准档案 / 离散度分析)"]
-    STAGE1 --> STAGE2["阶段 2: 轨迹一致性 v3\n(局部支持窗 / R1-R4闭环)"]
-    STAGE2 --> STAGE3["阶段 3: 多原型身份表示\n(AppearancePrototype / 009迁移)"]
-    STAGE3 --> STAGE4["阶段 4: 候选与集团验收解耦\n(四道关卡 / Tarjan割边剪枝)"]
-    STAGE4 --> STAGE5["阶段 5: 统一增量流水线\n(Revision R / 时空互斥引擎)"]
-    STAGE5 --> TUNING["工程微调\n(27与15号球员闭环)"]
-    TUNING --> STAGE6["阶段 6: 角色解耦与独立终验\n(PersonRole / 防火墙 / 9大指标)"]
+## 阶段 1：双流特征提取器 (T1)
+
+### 任务目标
+实现 `app/features/` 模块，读取切片图片（`test/track/*/samples/*.png`）提取球衣号码识别特征，并与外观特征打包成符合 `DualStreamFeature` 契约的标准输出。
+
+### 任务指令卡 (可直接发给 Agent)
+```markdown
+【任务名称】：T1 双流特征提取器构建
+【工作目录】：player-library/
+【允许修改的文件】：
+  - app/features/jersey_number.py (新建)
+  - app/features/appearance.py (新建)
+  - app/features/dual_stream.py (新建)
+  - tests/test_dual_stream_features.py (新建)
+【严禁修改的文件】：
+  - docs/data-contracts.md
+  - test/ 下的任何文件
+【输入契约】：List[TrackObservation]，包含样本切片路径与轨迹元数据
+【输出契约】：List[DualStreamFeature]，包含 JerseyNumberPrediction 与 AppearanceEmbedding
+【核心要求】：
+  1. 采用 OCR / 轻量场景文本识别模型读取球衣号码；
+  2. 实现时序置信度投票 (Temporal Voting)，同一条轨迹内多帧结果投票得到整段号码；
+  3. 外观流输出 512 维 L2 归一化向量；
+  4. 绝不以任何方式读取 test/annotations.csv 或 test/target/；
+【验收命令】：
+  uv run pytest tests/test_dual_stream_features.py
+  uv run ruff check app/features/
 ```
 
 ---
 
-## 2. 阶段达成与交付清单回顾
+## 阶段 2：时空硬排他与多原型增量匹配引擎 (T2)
 
-### 2.1 早期基础建设 (M1 ~ M6 里程碑，2026-11-03 ~ 2026-11-06)
-- **M1 (标准证据与输入适配)**：建立 Pydantic 2 统一契约；实现 `machine` 无答案白名单与 `sample_test` 历史样例只读适配；实现 `validate` 命令行工具。
-- **M2 (持久证据与比赛作用域)**：构建 SQLite 连接与基础迁移（001）；定义 `matches`, `clips`, `tracks`, `segments`, `samples`, `players` 等核心表；保证特征 BLOB 小端 float32 往返。
-- **M3 (初始化与人工档案维护)**：实现 `workflows.initialize` 与人工审核；完成迁移 004（`revision_states`）与 005（清洁审核绑定），支持可追溯历史版本恢复。
-- **M4 (增量匹配与图库维护)**：实现 `workflows.update`；支持固定快照隔离，避免同批错误串联。
-- **M5 (一般事件关联与时间线)**：实现 `events.validate` 与 `events.associate`；支持先于视频轨迹到达的孤立技术事件登记，并在身份确立后动态解析主体。
-- **M6 (接口与基线输出)**：实现 `baseline` 命令行工具，提供全新 SQLite 运行、无标注状态建库与冻结导出。
+### 任务目标
+实现 `app/identity/` 模块中的时空排他网络构建与多原型增量三态决策器。
 
-### 2.2 身份修复计划：阶段 0（统一覆盖漏斗与评测工具修复，2026-11-09）
-- **核心实证与纠偏**：废除浮动分母产生的虚假覆盖率；将全场 10 个比赛片段机器输入提炼为统一不可变分母：**158 条原始轨迹、1,759 个特征样本、75,465 条逐帧观测、1,346.35 秒时长**。
-- **评测工具除虫**：修复时间严格半开区间 $[start\_s, end\_s)$；修复 F1 边界计算（TP=0 时严格输出 0.0）；统一持久 player_id 评判；消除重复图片序列伪独立支持。
-- **交付产物**：`var/identity-repair/stage-0/handoff.txt`。
-
-### 2.3 身份修复计划：阶段 1（空间绑定距离校准与离散度诊断，2026-11-09）
-- **校准档案契约**：设计并实现 `DistanceCalibrationProfile`（schema: `distance-calibration-profile-v1`），实现参数与 `feature_space_id` 强绑定。
-- **实证离散度诊断**：对 1,113 对候选正例与 890 对物理负例执行经验分布扫描，证实余弦距离在 $[0.1652, 0.5757]$ 区间存在显著重叠；如实确立 `near=0.18`（外观近距离一致）与 `far=0.45`（强反证一票否决）双门槛，聚类门槛维持 0.28，保持 `status="uncalibrated"`，杜绝提前伪造校准成功。
-- **交付产物**：`var/identity-repair/stage-1/handoff.txt`。
-
-### 2.4 身份修复计划：阶段 2（轨迹一致性 v3 与增量资格解耦，2026-11-10）
-- **第三代一致性算法 (`track-consistency-v3`)**：引入局部连续外观支持窗、中心样本支撑（medoid anchor）与平滑过渡区，替代易误杀转身同人的全轨全对检查；在固定分母下将局部一致段覆盖率提升至 25.7% (452 样本 / 137 段)。
-- **资格解耦**：将 `can_match_existing` 与 `can_create_new_identity` 解耦，允许 2 桶短段参与已有匹配，同时硬拦截其独立聚类建档。
-- **专项漏洞闭环 (R1 ~ R4)**：
-  * R1：建立校准档案强一致性断言，杜绝参数静默旁路；
-  * R2：实现校准候选严格准入与 `min_part_visibility` 过滤；
-  * R3：基线增量运行汇总全批次分段报告，彻底恢复漏斗单调递减（452 -> 166 -> 141）；
-  * R4：激活部分复制证据独立组件基数（$\ge 3$）、覆盖率（$\ge 0.8$）与跨片双见证硬约束。
-- **交付产物**：`var/identity-repair/stage-2/handoff.txt`。
-
-### 2.5 身份修复计划：阶段 3（多原型身份表示与模板证据结构，2026-11-10）
-- **多原型表征 (`AppearancePrototype`)**：废弃单均值中心模糊向量，建立高质量局部 medoids 多原型体系，完整保留时间桶、可靠可见部位与独立见证。
-- **相容视角度量与一票否决**：实现相容最佳视角匹配与少数异类强反证（$\text{dist} \ge 0.45$）一票否决。
-- **存储迁移 009**：引入 `template_prototypes` 关系表，支持多原型元数据、可靠部位与图库模板的严格持久化与双向检索。
-- **交付成绩**：全场基线 Cold 跨片段对偶精度达 100%（TP=83, FP=0, F1=0.0556，历史首次实现冷启动正向跨片召回），误合并严格为 0。
-- **交付产物**：`var/identity-repair/stage-3/handoff.txt`。
-
-### 2.6 身份修复计划：阶段 4（候选生成与四道严苛集团验收解耦，2026-11-10）
-- **彻底解耦聚类与验收**：层次聚类仅用于生成候选簇；候选簇必须经受四道严苛集团验收关卡：
-  1. 簇内强反证消除（内部无 far $\ge 0.45$ 对）；
-  2. Rival Margin 竞争对抗过滤（$\Delta \ge 0.04$）；
-  3. Tarjan 割边剪枝（剪除单桥接脆弱连接，消除 A-B-C 串联混人）；
-  4. 跨至少 2 片段独立双见证校验。
-- **交付成绩**：跨球员误合并与拆分错误严格全部为 0，Forward 增量对偶精度达 100%（TP=80, FP=0），Cold vs Forward 联合 ARI 达 1.0000。
-- **交付产物**：`var/identity-repair/stage-4/handoff.txt`。
-
-### 2.7 身份修复计划：阶段 5（统一冷启动与开放集合增量更新，2026-11-10）
-- **消解双轨分歧**：彻底消解冷启动与增量更新的代码重复与阈值分歧，统一落实 Revision R 闭环 7 步更新流水线；
-- **时序漏洞消除与时空硬互斥**：消除增量更新“先遍历者先获利”漏洞；接入 `SpatioTemporalConstraintEngine` 实施 Must-Not-Link 铁律；实现历史延期证据（`segmentation_proposals`）联合代表元重构；
-- **三态决策**：统一输出 `matched_existing`、`created_new_identity`、`insufficient_evidence` 三态互斥决策。
-- **交付成绩**：Forward vs Reverse 顺序稳定性 ARI 达到 0.9236（较阶段 4 提升 +12.4%），Cold vs Forward 联合 ARI 达 1.0000，误合并严格全部为 0。
-- **交付产物**：`var/identity-repair/stage-5/handoff.txt`。
-
-### 2.8 工程微调（27与15号球员工程微调，2026-11-11）
-- **边缘特征调优**：针对 27 号与 15 号球员在边缘机位下的微弱特征漂移实施微调；
-- **交付成绩**：保持全场 0 误合并与 0 拆分，测试用例全部闭环。
-- **交付产物**：`var/identity-repair/finetune-27-15/handoff.txt`。
-
-### 2.9 身份修复计划：阶段 6（角色解耦与独立终验，2026-11-12）
-- **四层架构单向解耦**：彻底单向解耦 machine 适配器、核心身份算法、下游展示与事件层；
-- **角色域隔离**：引入 `PersonRole` 枚举；通过迁移 010 表达式索引实现匿名身份档案（`UNKNOWN_ROLE`）与正式球员统计（`PLAYER`）的零开销分流；
-- **防火墙绝对隔离**：实现 `assert_inference_isolation`、`assert_no_ground_truth_in_evidence` 与 `assert_frozen_before_scoring`；
-- **Review Queue 契约升级**：增加时空定位坐标；自动将视频 3（clip_03）重叠框（`duplicate_box`）等关键风险段置为 `critical` 优先级并提供一键操作建议；
-- **交付成绩**：全场基线 Cold 与 Forward 跨片对偶精度均为 100%（FP=0, TP=68 Cold, TP=148 Forward），跨球员误合并与拆分错误严格全部为 0，物理同屏碰撞为 0，顺序稳定性 ARI 达 0.9264 / 0.9823 / 0.8830；全仓 740 项测试全数通过（739 passed, 1 skipped）。
-- **交付产物**：`var/identity-repair/stage-6/handoff.txt`。
+### 任务指令卡 (可直接发给 Agent)
+```markdown
+【任务名称】：T2 时空排他与多原型增量匹配引擎
+【工作目录】：player-library/
+【允许修改的文件】：
+  - app/identity/constraints.py (新建或重构)
+  - app/identity/matching.py (新建或重构)
+  - tests/test_constraints_and_matching.py (新建)
+【严禁修改的文件】：
+  - docs/data-contracts.md
+  - app/features/
+【输入契约】：
+  - 待分配 DualStreamFeature 清单
+  - 活跃 PlayerProfile 与多原型图库 (Revision R 快照)
+【输出契约】：IncrementalPlan，包含每段的三态决策 (matched_existing / created_new / insufficient)
+【核心要求】：
+  1. 构建 Cannot-Link 排他图：同一视频源同一物理帧出现的两人，距离强制设为 +inf；
+  2. 号码一票否决：若候选号码与已有球员号码不同（如 10 vs 27），绝对禁止匹配；
+  3. 多原型相容匹配：计算候选段与已有球员典型原型的距离，要求通过距离门槛且满足竞争边距 (margin >= 0.04)；
+  4. 最大相容团挖掘：采用带 Cannot-Link 互斥约束的最大相容团启发式算法，以最高质量未分配节点为 Seed 贪心成团；只有跨至少 2 个片段获得独立见证 (`len(videos) >= 2`) 的新集团才允许建立新档案；单次孤立段一律标记为 insufficient_evidence (待定)，严禁级联剔除整个连通分支；
+【验收命令】：
+  uv run pytest tests/test_constraints_and_matching.py (100 项测试通过)
+  uv run ruff check app/identity/
+```
 
 ---
 
-## 3. 终验指标矩阵对照表 (Stage 6 Benchmark Metrics)
+## 阶段 3：流水线组装与 SQLite 版本化原子存储 (T3)
 
-| 指标项 (Metric) | 阶段 0 起点 | 阶段 2 (第一轮结项) | 阶段 5 (统一增量) | 阶段 6 (全案终验基线) | 业务与算法标准 |
-| :--- | :---: | :---: | :---: | :---: | :--- |
-| **测试套件通过数** | 682 passed | 700 passed | 726 passed | **739 passed (1 skipped)** | 100% 契约与业务覆盖 |
-| **跨片段对偶精度 (Precision)** | NaN (TP=0) | 100.0% (FP=0) | 100.0% (FP=0) | **100.0% (FP=0, TP=148 Fwd)** | 绝对零误报（高纯度） |
-| **跨球员误合并 (Merge Errors)** | 0 | 0 | 0 | **0 处 (0.0% 混人)** | 绝无多真值混入同一档案 |
-| **同人拆档率 (Split Errors)** | 0 | 0 | 0 | **0 处 (0.0% 拆档)** | 目标真值人物无一人被拆分 |
-| **已归人纯度 (Assigned Purity)**| NaN | 1.0000 | 1.0000 | **1.0000 (100.0% 纯净)** | 多数类占据 100% 比例 |
-| **时空物理违规 (Collisions)** | 0 | 0 | 0 | **0 violations** | 75,465 逐帧观测零同屏违规 |
-| **批次顺序稳定性 (Joint ARI)**| NaN | 0.8830 | 0.9236 | **0.9264 (Cold vs Fwd)** | 跨时序极高聚类拓扑一致 |
-| **非球员污染率 (Pollution)** | 未解耦 | 未解耦 | 未解耦 | **0.0% (默认物理隔离)** | 匿名档案未污染正式榜单 |
-| **数据库迁移版本** | 006 | 008 | 009 | **010 (完整支持多原型与角色)**| 严格向后兼容 |
+### 任务目标
+将 T1 特征提取器、T2 匹配引擎串联进 `app/workflows/incremental.py`，实现分批到达、SQLite 事务提交、留一法重估与幂等中断续跑。
+
+### 任务指令卡 (可直接发给 Agent)
+```markdown
+【任务名称】：T3 流水线组装与 SQLite 版本化存储
+【工作目录】：player-library/
+【允许修改的文件】：
+  - app/workflows/incremental.py
+  - app/storage/
+  - tests/test_incremental_pipeline_e2e.py
+【严禁修改的文件】：
+  - docs/data-contracts.md
+  - app/features/
+  - app/identity/
+【输入契约】：分批视频片段 (Clip 3, 20, 43, 50, 6, 68 等顺序输入)
+【输出契约】：数据库事务提交，推进至 Revision R+1，并输出不可变运行产物
+【核心要求】：
+  1. 独占写事务 (BEGIN IMMEDIATE)，写操作完全基于快照隔离；
+  2. 实现留一法重估 (Leave-one-out Reassessment)：对机器暂定归属排除自身后重估，支持版本化重分配；
+  3. 幂等性：中断后重放或重复提交请求，保持数据完全一致 (changed=False)；
+  4. 产物留痕于 var/runs/，生成不可变 handoff.txt；
+【验收命令】：
+  uv run pytest tests/test_incremental_pipeline_e2e.py
+  uv run ruff check app/workflows/
+```
 
 ---
 
-## 4. 交付资产与代码库标签
+## 阶段 4：独立评分防火墙与黄金评测达标 (T4)
 
-全案工作在此圆满结项。全部技术资产、基线报告、测试用例与架构文档已达到生产级发布标准，正式打上 Git 交付标签：
-- **Git 标签**：`v1.0.0-identity-repair`
-- **代码库状态**：干净可维护、架构四层解耦、100% 文档代码一致性、740 项测试无损运行。
+### 任务目标
+运行独立评分工具，核验 T3 生成的冻结输出，在固定 70 分母上独立计算 27 号覆盖率与纯度指标。
+
+### 任务指令卡 (可直接发给 Agent)
+```markdown
+【任务名称】：T4 独立黄金评测与达标验证
+【工作目录】：player-library/
+【允许修改的文件】：
+  - app/evaluation/
+  - tests/test_evaluation_harness.py
+【严禁修改的文件】：
+  - app/features/
+  - app/identity/
+  - app/workflows/
+【输入契约】：
+  - 冻结运行产物 (artifact-hashes.json 校验)
+  - 秘密答案：test/annotations.csv、test/target/
+【输出契约】：EvaluationBenchmarkResult 与详细失败归因账本
+【核心要求】：
+  1. 双进程物理隔离：只有在产物哈希核验完全通过后，评分工具才允许打开 annotations；
+  2. 在固定 70 个测试样本上评分，严禁缩小分母或挑选有利样本；
+  3. 报告 27 号命中率（目标 >= 57/70，即 >80%）；
+  4. 报告已知异人（10号、15号）混入数（目标必须为 0）；
+  5. 报告空间分离物理冲突（目标必须为 0）；
+  6. 结果汇总写入 docs/current-state.md；
+【验收命令】：
+  uv run python -m app.evaluation.run_benchmark --run-dir <latest_run_dir>
+  uv run pytest tests/test_evaluation_harness.py
+```
